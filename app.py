@@ -15,7 +15,7 @@ import streamlit as st
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 BASE_DIR     = Path(__file__).resolve().parent
-VS_DIR       = BASE_DIR / "data" / "vectorstore"
+VS_DIR       = BASE_DIR / "vectorstore"
 FEEDBACK_LOG = BASE_DIR / "data" / "feedback_log.jsonl"
 sys.path.insert(0, str(BASE_DIR / "pipeline"))
 
