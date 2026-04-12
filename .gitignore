@@ -1,0 +1,37 @@
+# Data and vectorstore
+data/
+__pycache__/
+
+# Environment variables
+.env
+.env.local
+
+# Python
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+*.egg
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# Testing
+.pytest_cache/
+.coverage
+
+# Logs
+*.log
