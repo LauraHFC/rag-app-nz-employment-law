@@ -25,38 +25,8 @@ This application helps users understand their rights and obligations under New Z
 ### Prerequisites
 - Python 3.10+
 - `pip` package manager
-- An Anthropic API key (get one at https://console.anthropic.com)
+- An Anthropic API key 
 
-### Setup
-
-1. Clone the repository:
-```bash
-git clone https://github.com/LauraHFC/rag-app-nz-employment-law.git
-cd rag-app-nz-employment-law
-```
-
-2. Create a virtual environment:
-```bash
-python3 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
-
-3. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
-
-4. Set your API key:
-```bash
-export ANTHROPIC_API_KEY=sk-ant-... # Replace with your key
-```
-
-5. Run the app:
-```bash
-streamlit run app.py
-```
-
-The app will be available at `http://localhost:8501`
 
 ## Project Structure
 
