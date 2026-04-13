@@ -24,7 +24,6 @@ This application helps users understand their rights and obligations under New Z
 
 ### Prerequisites
 - Python 3.10+
-- `pip` package manager
 - An Anthropic API key 
 
 
