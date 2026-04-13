@@ -32,16 +32,9 @@ This application helps users understand their rights and obligations under New Z
 ```
 .
 ├── app.py                    # Main Streamlit application
-├── pipeline/
-│   ├── rag_query.py         # RAG querying logic
-│   ├── build_vectorstore.py # Vector database construction
-│   ├── collect.py           # Data collection from sources
-│   ├── extract_clean.py     # Data extraction and cleaning
-│   ├── recursive_crawler.py  # Web scraping utility
-│   └── run_complete_crawl.py # Complete pipeline runner
+├── rag_query.py              # RAG querying logic
 ├── requirements.txt          # Python dependencies
-└── data/                     # Generated vectorstore (not in repo)
-    └── vectorstore/
+├── vectorstore/              # Generated vectorstore (not in repo)
 ```
 <img width="1800" height="1240" alt="product-flow" src="https://github.com/user-attachments/assets/924d2c3a-35da-4b60-b5a6-7e17ea568972" />
 
