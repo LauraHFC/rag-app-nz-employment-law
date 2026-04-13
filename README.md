@@ -44,6 +44,7 @@ This application helps users understand their rights and obligations under New Z
 └── data/                     # Generated vectorstore (not in repo)
     └── vectorstore/
 ```
+<img width="1800" height="1240" alt="product-flow" src="https://github.com/user-attachments/assets/924d2c3a-35da-4b60-b5a6-7e17ea568972" />
 
 ## Deployment
 
