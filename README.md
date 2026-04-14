@@ -43,7 +43,9 @@ Data Pipeline in Python:
    2. Data cleaning & structuring
    3. Chunking & vectorisation into a vector database
    4. Semantic retrieval + LLM response generation with source citations
-And:
+
+# And
+
    6. Frontend UI/UX with full API integration
    7. Test — Functional testing, edge cases, and legal accuracy checks
 
