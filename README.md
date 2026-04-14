@@ -1,7 +1,8 @@
 # NZ Employment Law Assistant
 
 An AI-powered chatbot for answering New Zealand employment law questions. Built with Retrieval-Augmented Generation (RAG) and Claude API.
-**https://nzlaw.linkiwise.com**
+
+**This application is deployed on Railway and accessible at: https://nzlaw.linkiwise.com**
 
 ## Overview
 
@@ -49,11 +50,6 @@ Data Pipeline in Python:
 
    6. Frontend UI/UX with full API integration
    7. Test — Functional testing, edge cases, and legal accuracy checks
-
-## Deployment
-
-This application is deployed on Railway and accessible at:
-
 
 ### Environment Variables
 
