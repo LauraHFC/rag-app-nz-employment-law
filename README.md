@@ -38,6 +38,15 @@ This application helps users understand their rights and obligations under New Z
 ```
 <img width="1800" height="1240" alt="product-flow" src="https://github.com/user-attachments/assets/924d2c3a-35da-4b60-b5a6-7e17ea568972" />
 
+Data Pipeline in Python:
+   1. Automated data collection from NZ legal sources
+   2. Data cleaning & structuring
+   3. Chunking & vectorisation into a vector database
+   4. Semantic retrieval + LLM response generation with source citations
+And:
+   6. Frontend UI/UX with full API integration
+   7. Test — Functional testing, edge cases, and legal accuracy checks
+
 ## Deployment
 
 This application is deployed on Railway and accessible at:
