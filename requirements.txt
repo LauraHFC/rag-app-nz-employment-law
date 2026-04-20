@@ -1,7 +1,6 @@
-streamlit==1.40.0
+fastapi
+uvicorn[standard]
 anthropic>=0.32.0
 chromadb>=0.4.0
-langchain>=0.1.0
-requests>=2.31.0
+sentence-transformers
 python-dotenv>=1.0.0
-sentence-transformers>=2.2.0
