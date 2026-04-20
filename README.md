@@ -23,6 +23,11 @@ Try asking:
 - *What is a 90-day trial period and how does it work?*
 
 ---
+## About This Project
+
+This project was built as a complete end-to-end RAG application — from data pipeline design through to production deployment. The full development lifecycle covered: ideation, research, MVP scoping, PRD, implementation, testing, deployment, and validation.
+<img width="1800" height="1240" alt="product-flow" src="https://github.com/user-attachments/assets/b3b351f9-22f7-4ba6-bbd2-b76fbc2db9f7" />
+
 
 ## Features
 
@@ -38,14 +43,14 @@ Try asking:
 ## System Architecture
 
 ```
-Data Sources (6 NZ Government Websites)
+Data Sources (NZ Government Websites)
          │
          ▼
-Recursive Web Crawler          ← pipeline/recursive_crawler.py
+Recursive Web Crawler          
 (1,283 URLs → 1,227 collected)
          │
          ▼
-Data Cleaning & Extraction     ← pipeline/extract_clean.py
+Data Cleaning & Extraction    
 (HTML + PDF → structured text)
          │
          ▼
@@ -70,16 +75,7 @@ Streamlit Web UI               ← app.py
 
 ### Phase 1 — Data Collection
 
-Automated collection from 6 authoritative NZ government sources:
-
-| Source | Content |
-|--------|---------|
-| employment.govt.nz | Employment guidance |
-| legislation.govt.nz | Official NZ legislation |
-| era.govt.nz | Employment Relations Authority |
-| dol.govt.nz | Department of Labour |
-| mbie.govt.nz | Ministry of Business, Innovation & Employment |
-| worksafe.govt.nz | WorkSafe New Zealand |
+Automated collection from authoritative NZ government sources:
 
 **Results:** 1,283 URLs discovered → 1,227 successfully collected (95.6%) → 1,233 HTML/PDF files
 
@@ -103,8 +99,8 @@ Automated collection from 6 authoritative NZ government sources:
 
 ### Phase 3 — Vectorisation
 
-- Embedding model: `sentence-transformers/all-MiniLM-L6-v2` (local, no API required, 33M params)
-- Vector store: ChromaDB with HNSW indexing and cosine similarity
+- **Embedding model:** `sentence-transformers/all-MiniLM-L6-v2` (local, no API required, 33M params)
+- **Vector store:** ChromaDB with HNSW indexing and cosine similarity
 - **1,960 chunks embedded in 17.8 seconds** (110 chunks/second)
 
 ### Phase 4 — Retrieval Validation
@@ -131,23 +127,6 @@ def query(question):
 
 System prompt instructs the model to: cite specific sections, be concise and practical, and explicitly decline when the answer is not in the retrieved documents.
 
----
-
-## Performance Metrics
-
-| Metric | Value |
-|--------|-------|
-| Data sources | 6 NZ government websites |
-| URLs collected | 1,227 (95.6% success rate) |
-| Chunks in vector store | 1,960 |
-| Retrieval coverage | 100% (20/20 test questions) |
-| Embedding speed | 110 chunks/second |
-| Vector DB build time | 17.8 seconds |
-| Estimated API cost | ~$0.015 per query |
-| Total Python code | ~2,000 lines |
-| Total dev time | ~4 hours (with Vibe Coding) |
-
----
 
 ## Tech Stack
 
@@ -163,90 +142,6 @@ System prompt instructs the model to: cite specific sections, be concise and pra
 | LLM | Anthropic Claude API (claude-haiku-4-5) |
 | Frontend | Streamlit |
 | Deployment | Railway |
-
----
-
-## Project Structure
-
-```
-.
-├── app.py                       # Streamlit frontend application
-├── pipeline/
-│   ├── recursive_crawler.py     # Recursive web crawler (650+ lines)
-│   ├── extract_clean.py         # Data extraction, cleaning & chunking (390+ lines)
-│   ├── build_vectorstore.py     # Vector database construction (150+ lines)
-│   ├── rag_query.py             # RAG query system — retrieval + generation (200+ lines)
-│   ├── run_complete_crawl.py    # Pipeline orchestrator
-│   └── collect.py               # Original collection reference
-├── tests/
-│   ├── run_retrieval_tests.py   # 20-question retrieval test suite (550+ lines)
-│   ├── retrieval_test_queries.json  # Test questions + expected answers
-│   └── reports/                 # Generated test reports (JSON + Markdown)
-├── data/
-│   ├── raw/                     # Crawled HTML/PDF files (not in repo)
-│   ├── chunks/chunks.jsonl      # 1,960 processed chunks (not in repo)
-│   └── vectorstore/             # ChromaDB database (not in repo)
-├── docs/                        # Additional documentation
-├── requirements.txt             # Python dependencies
-├── Dockerfile                   # Container configuration
-└── setup_mac.sh                 # Mac environment setup script
-```
-
----
-
-## Running Locally
-
-### Prerequisites
-
-- Python 3.10+
-- An Anthropic API key — [get one here](https://console.anthropic.com)
-- The pre-built vector store (see note below)
-
-> **Note:** The `data/` directory (raw files, chunks, and vector store) is not included in this repository due to size. To rebuild from scratch, run the full pipeline as described below. This takes approximately 60–90 minutes for the crawl phase.
-
-### Quick Start (with existing vector store)
-
-```bash
-# 1. Clone the repo
-git clone https://github.com/LauraHFC/rag-app-nz-employment-law.git
-cd rag-app-nz-employment-law
-
-# 2. Create virtual environment
-python3 -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-
-# 3. Install dependencies
-pip install -r requirements.txt
-
-# 4. Set API key
-export ANTHROPIC_API_KEY=sk-ant-...
-
-# 5. Run
-streamlit run app.py
-```
-
-App available at `http://localhost:8501`
-
-### Rebuilding the Pipeline from Scratch
-
-```bash
-# Step 1: Crawl all sources (~60 min)
-python pipeline/run_complete_crawl.py --all-sources
-
-# Step 2: Extract, clean and chunk
-python pipeline/extract_clean.py
-
-# Step 3: Build vector store
-python pipeline/build_vectorstore.py
-
-# Step 4: Validate retrieval quality
-python tests/run_retrieval_tests.py --output-format markdown
-
-# Step 5: Run the app
-streamlit run app.py
-```
-
----
 
 ## Deployment
 
@@ -278,12 +173,6 @@ Using Claude Haiku (most cost-effective model):
 No user data is collected. All conversations are temporary and exist only in your browser session — permanently deleted when you close or refresh the page.
 
 ---
-
-## About This Project
-
-This project was built as a complete end-to-end RAG application — from data pipeline design through to production deployment. The full development lifecycle covered: ideation, research, MVP scoping, PRD, implementation, testing, deployment, and validation.
-
-Built solo in approximately 4 hours of active development time, with AI-assisted development (Vibe Coding).
 
 **Author:** Laura Cai · [Portfolio](https://linkiwise.com) · [LinkedIn](https://www.linkedin.com/in/laurahfc/)
 
