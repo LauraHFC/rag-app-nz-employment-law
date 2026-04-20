@@ -19,7 +19,7 @@ COPY --from=builder /install /usr/local
 # Copy application code
 COPY rag_query.py .
 COPY api/ ./api/
-COPY vectorstore/ ./vectorstore/
+COPY vectorstore/ ./data/vectorstore/
 
 # Create data directory for feedback logs
 RUN mkdir -p data
