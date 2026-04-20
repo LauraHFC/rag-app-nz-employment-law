@@ -37,6 +37,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "https://nzlaw.linkiwise.com",
+        "https://nz-employment-law-frontend.vercel.app",
         "http://localhost:3000",
         "http://localhost:3001",
     ],
