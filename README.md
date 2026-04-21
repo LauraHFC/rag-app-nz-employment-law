@@ -1,6 +1,6 @@
 # NZ Employment Law Assistant
 
-An AI-powered Q&A chatbot for New Zealand employment law — built with a full RAG pipeline, Claude API, and Streamlit. Live at **[nzlaw.linkiwise.com](https://nzlaw.linkiwise.com)**.
+An AI-powered Q&A chatbot for New Zealand employment law — built with a full RAG pipeline, FastAPI backend, and React/Next.js frontend. Live at **[nzlaw.linkiwise.com](https://nzlaw.linkiwise.com)**.
 
 > ⚖️ For informational purposes only — not legal advice. For serious matters, consult a qualified employment lawyer.
 
@@ -8,7 +8,7 @@ An AI-powered Q&A chatbot for New Zealand employment law — built with a full R
 
 ## Why This Exists
 
-General AI tools can answer employment law questions — but they can hallucinate, cite outdated legislation, or give confident-sounding answers with no way to verify them. This tool takes a different approach: every answer is grounded in retrieved content from authoritative NZ government sources, with the specific document and URL attached to every response. You can read the source yourself. You can verify it.
+General AI tools can answer employment law questions — but they hallucinate, cite outdated legislation, or give confident-sounding answers with no way to verify them. This tool takes a different approach: every answer is grounded in retrieved content from authoritative NZ government sources, with the specific document and URL attached to every response. You can read the source yourself. You can verify it.
 
 ---
 
@@ -23,11 +23,16 @@ Try asking:
 - *What is a 90-day trial period and how does it work?*
 
 ---
+
 ## About This Project
 
 This project was built as a complete end-to-end RAG application — from data pipeline design through to production deployment. The full development lifecycle covered: ideation, research, MVP scoping, PRD, implementation, testing, deployment, and validation.
+
+The system was originally prototyped with a Streamlit UI. It has since been refactored to a production architecture: a FastAPI backend serving a REST API, and a React/Next.js frontend deployed independently — with a clean separation of concerns and extensibility for future knowledge bases.
+
 <img width="1800" height="1240" alt="product-flow" src="https://github.com/user-attachments/assets/b3b351f9-22f7-4ba6-bbd2-b76fbc2db9f7" />
 
+---
 
 ## Features
 
@@ -35,7 +40,7 @@ This project was built as a complete end-to-end RAG application — from data pi
 - ✅ Source citations with URLs for every response — fully verifiable
 - ✅ Handles both simple factual questions and complex situational queries
 - ✅ Declines to answer when retrieved context is insufficient (no hallucination)
-- ✅ Clean Streamlit UI with example question chips
+- ✅ Production React/Next.js UI with topic-driven architecture
 - ✅ Privacy-first — no user data collected, sessions are ephemeral
 
 ---
@@ -46,27 +51,32 @@ This project was built as a complete end-to-end RAG application — from data pi
 Data Sources (NZ Government Websites)
          │
          ▼
-Recursive Web Crawler          
+Recursive Web Crawler
 (1,283 URLs → 1,227 collected)
          │
          ▼
-Data Cleaning & Extraction    
+Data Cleaning & Extraction
 (HTML + PDF → structured text)
          │
          ▼
-Chunking & Quality Scoring     ← tiktoken + LangChain splitter
+Chunking & Quality Scoring       ← tiktoken + LangChain splitter
 (1,960 chunks, 1,000 tokens avg)
          │
          ▼
-Vectorisation & Indexing       ← pipeline/build_vectorstore.py
+Vectorisation & Indexing         ← pipeline/build_vectorstore.py
 (ChromaDB + all-MiniLM-L6-v2)
          │
          ▼
-RAG Query System               ← pipeline/rag_query.py
+RAG Query System                 ← pipeline/rag_query.py
 (Semantic retrieval → Claude API → cited answer)
          │
          ▼
-Streamlit Web UI               ← app.py
+FastAPI REST API                 ← api/main.py (Railway)
+(nzlaw-api.linkiwise.com)
+         │
+         ▼
+React / Next.js Frontend         ← github.com/LauraHFC/nz-employment-law-frontend (Vercel)
+(nzlaw.linkiwise.com)
 ```
 
 ---
@@ -120,19 +130,20 @@ Automated collection from authoritative NZ government sources:
 ```python
 # Core flow
 def query(question):
-    docs, metas = retrieve(question, n_results=5)   # ChromaDB semantic search
+    docs, metas = retrieve(question, n_results=5)    # ChromaDB semantic search
     answer, sources = generate(question, docs, metas) # Claude API with source attribution
     return {"question": question, "answer": answer, "sources": sources}
 ```
 
 System prompt instructs the model to: cite specific sections, be concise and practical, and explicitly decline when the answer is not in the retrieved documents.
 
+---
 
 ## Tech Stack
 
 | Layer | Technology |
 |-------|-----------|
-| Language | Python 3.10+ |
+| Language | Python 3.11 |
 | Web crawling | requests, BeautifulSoup4 |
 | PDF extraction | pdfplumber |
 | Text processing | ftfy, tiktoken |
@@ -140,19 +151,34 @@ System prompt instructs the model to: cite specific sections, be concise and pra
 | Embeddings | sentence-transformers/all-MiniLM-L6-v2 |
 | Vector database | ChromaDB |
 | LLM | Anthropic Claude API (claude-haiku-4-5) |
-| Frontend | Streamlit |
-| Deployment | Railway |
+| Backend API | FastAPI + uvicorn |
+| Frontend | React / Next.js 14 (TypeScript) |
+| Backend deployment | Railway |
+| Frontend deployment | Vercel |
+
+---
+
+## Repositories
+
+| Repo | Description |
+|------|-------------|
+| [rag-app-nz-employment-law](https://github.com/LauraHFC/rag-app-nz-employment-law) | Data pipeline + FastAPI backend |
+| [nz-employment-law-frontend](https://github.com/LauraHFC/nz-employment-law-frontend) | React / Next.js frontend |
+
+---
 
 ## Deployment
 
-Deployed on **Railway** at [https://nzlaw.linkiwise.com](https://nzlaw.linkiwise.com).
+| Service | URL | Platform |
+|---------|-----|----------|
+| Frontend | [nzlaw.linkiwise.com](https://nzlaw.linkiwise.com) | Vercel |
+| Backend API | [nzlaw-api.linkiwise.com](https://nzlaw-api.linkiwise.com) | Railway |
 
-### Environment Variables
+### Environment Variables (Backend)
 
 | Variable | Description |
 |----------|-------------|
 | `ANTHROPIC_API_KEY` | Anthropic API key (required) |
-| `STREAMLIT_SERVER_PORT` | Server port (default: 8501) |
 
 ---
 
