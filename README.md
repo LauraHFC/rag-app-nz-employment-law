@@ -14,7 +14,7 @@ General AI tools can answer employment law questions — but they hallucinate, c
 
 ## Live Demo
 
-**[https://nzlaw.linkiwise.com](https://nzlaw.linkiwise.com)** *(desktop recommended)*
+**[https://nzlaw.linkiwise.com](https://nzlaw.linkiwise.com)** *(both desktop and mobile)*
 
 Try asking:
 - *What is the current minimum wage in New Zealand?*
