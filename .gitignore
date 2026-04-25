@@ -1,5 +1,9 @@
-# Data and vectorstore
-data/
+# Data — exclude raw/temp only, keep vectorstore and DB for deployment
+data/raw/
+data/raw_stats_nz/
+data/chunks/
+data/feedback_log.jsonl
+
 __pycache__/
 
 # Environment variables
