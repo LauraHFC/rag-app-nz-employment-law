@@ -1,5 +1,4 @@
 # api/main.py — FastAPI wrapper around RAGSystem (§3.2 handoff doc)
-# DO NOT modify anything in pipeline/, data/, or tests/
 
 import json
 import os
@@ -12,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 # ── Add project root to path so pipeline imports work ─────────────────────────
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from rag_query import RAGSystem  # noqa: E402
+from pipeline.rag_query import RAGSystem  # noqa: E402
 
 from api.models import (  # noqa: E402
     FeedbackRequest,
@@ -25,11 +24,19 @@ from api.models import (  # noqa: E402
     TopicsResponse,
 )
 
+# ── Intelligence Hub router (Phase 3) ─────────────────────────────────────────
+from api.intelligence_hub import hub_router  # noqa: E402
+
 # ── App setup ──────────────────────────────────────────────────────────────────
 app = FastAPI(
-    title="NZ Employment Law Assistant API",
-    version="1.0.0",
-    description="FastAPI wrapper around the RAG pipeline. See /docs for interactive API explorer.",
+    title="NZ Employment Intelligence Hub API",
+    version="2.0.0",
+    description=(
+        "NZ Employment Intelligence Hub. "
+        "Original RAG endpoint: POST /api/query. "
+        "New unified endpoint: POST /api/hub/query (auto-routes legal / data / hybrid). "
+        "See /docs for interactive API explorer."
+    ),
 )
 
 # ── CORS (§6.3 handoff doc) ───────────────────────────────────────────────────
@@ -41,6 +48,7 @@ app.add_middleware(
         "http://localhost:3000",
         "http://localhost:3001",
     ],
+
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type"],
 )
@@ -81,6 +89,9 @@ TOPIC_COLLECTION_MAP: dict[str, str] = {
 
 # Feedback log path
 FEEDBACK_LOG = Path(__file__).parent.parent / "data" / "feedback_log.jsonl"
+
+# ── Mount Intelligence Hub router ─────────────────────────────────────────────
+app.include_router(hub_router)
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────

@@ -17,9 +17,10 @@ WORKDIR /app
 COPY --from=builder /install /usr/local
 
 # Copy application code
-COPY rag_query.py .
 COPY api/ ./api/
-COPY vectorstore/ ./data/vectorstore/
+COPY pipeline/ ./pipeline/
+COPY data/vectorstore/ ./data/vectorstore/
+COPY data/stats_nz.db ./data/stats_nz.db
 
 # Create data directory for feedback logs
 RUN mkdir -p data
