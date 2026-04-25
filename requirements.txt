@@ -12,3 +12,6 @@ pydantic>=2.0.0
 # Phase 2 — Text-to-SQL
 duckdb>=0.10.0
 pandas>=2.0.0
+
+# RAG embeddings
+sentence-transformers>=2.2.0

@@ -49,8 +49,9 @@ app.add_middleware(
         "http://localhost:3001",
     ],
 
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["Content-Type"],
+    allow_credentials=False,
 )
 
 # ── RAG system singleton ──────────────────────────────────────────────────────
