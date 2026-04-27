@@ -63,7 +63,7 @@ Vector search         Haiku selects tables
 
 ## Features
 
-- ✅ Dual-channel retrieval: employment law documents + Stats NZ labour market data
+- ✅ Dual-channel retrieval: employment law documents + some NZ labour market data
 - ✅ Automatic intent routing — legal, data, or hybrid, handled transparently
 - ✅ Source citations with URLs for every legal response — fully verifiable
 - ✅ Interactive charts (line, bar, grouped bar, pie) for data answers
@@ -100,7 +100,7 @@ Vector search         Haiku selects tables
 
 Automated collection from authoritative NZ government sources:
 
-**Results:** 1,283 URLs discovered → 1,227 successfully collected (95.6%) → 1,233 HTML/PDF files
+**Results:**1,227 URLs successfully collected  → 1,233 HTML/PDF files
 
 ### Cleaning & Chunking
 
@@ -119,7 +119,7 @@ Automated collection from authoritative NZ government sources:
 
 - **Embedding model:** `sentence-transformers/all-MiniLM-L6-v2` (local, 33M params)
 - **Vector store:** ChromaDB with HNSW indexing and cosine similarity
-- **1,960 chunks embedded in 17.8 seconds**
+- **1,960 chunks embedded **
 
 ### Retrieval Validation
 
@@ -139,7 +139,7 @@ Automated collection from authoritative NZ government sources:
 
 ### Data
 
-11 Stats NZ Labour Market tables loaded into DuckDB, all following a unified long-format schema (`period | [dimension cols] | metric | value`):
+11 Stats NZ Labour Market tables loaded into **DuckDB**, all following a unified long-format schema (`period | [dimension cols] | metric | value`):
 
 | Table | Coverage |
 |---|---|
@@ -160,12 +160,12 @@ Automated collection from authoritative NZ government sources:
 ### SQL Generation
 
 ```
-Haiku selects 1–5 relevant tables from 11
+LLM(Haiku model) selects 1–5 relevant tables from 11
         ↓
 Focused schema prompt (60–90% fewer tokens than full schema)
 + 10 few-shot Q→SQL examples
         ↓
-Sonnet generates DuckDB SQL
+LLM(Sonnet model) generates DuckDB SQL
         ↓
 Read-only guard (_assert_read_only + duckdb read_only=True)
         ↓
@@ -200,7 +200,7 @@ QueryResult → DataFrame
 | Service | URL | Platform |
 |---------|-----|----------|
 | Frontend | [nzlaw.linkiwise.com](https://nzlaw.linkiwise.com) | Vercel |
-| Backend API | [nzlaw-api.linkiwise.com](https://nzlaw-api.linkiwise.com) | Railway |
+| Backend API | Railway |
 
 ### Environment Variables (Backend)
 
@@ -228,7 +228,7 @@ No user data is collected. All conversations are temporary and exist only in you
 
 ---
 
-**Author:** Laura Cai · [Portfolio](https://linkiwise.com) · [LinkedIn](https://www.linkedin.com/in/laurahfc/)
+**Author:** Laura Cai · [LinkedIn](https://www.linkedin.com/in/laurahfc/)
 
 ---
 
