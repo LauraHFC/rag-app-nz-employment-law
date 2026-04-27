@@ -1,100 +1,111 @@
-# NZ Employment Law Assistant
+# NZ Employment Intelligence Hub
 
-An AI-powered Q&A chatbot for New Zealand employment law — built with a full RAG pipeline, FastAPI backend, and React/Next.js frontend. Live at **[nzlaw.linkiwise.com](https://nzlaw.linkiwise.com)**.
+An AI-powered Q&A system for New Zealand employment law and labour market data — combining a full RAG pipeline with a Text-to-SQL engine over Stats NZ data. Live at **[nzlaw.linkiwise.com](https://nzlaw.linkiwise.com)**.
 
 > ⚖️ For informational purposes only — not legal advice. For serious matters, consult a qualified employment lawyer.
 
 ---
 
-## Why This Exists
+## What It Does
 
-General AI tools can answer employment law questions — but they hallucinate, cite outdated legislation, or give confident-sounding answers with no way to verify them. This tool takes a different approach: every answer is grounded in retrieved content from authoritative NZ government sources, with the specific document and URL attached to every response. You can read the source yourself. You can verify it.
+Ask a question in plain English. The system automatically routes it to the right knowledge source:
+
+| Query type | Example | How it's answered |
+|---|---|---|
+| **Legal** | *"What is the minimum notice period for dismissal?"* | RAG over NZ employment law documents |
+| **Data** | *"Which industry had the fastest wage growth over 5 years?"* | Text-to-SQL over Stats NZ labour market data |
+| **Hybrid** | *"My salary is below the industry average — what are my legal options?"* | Both channels, synthesised into one answer |
+
+Every legal answer includes the source document and URL so you can verify it yourself. Data answers include a chart.
 
 ---
 
 ## Live Demo
 
-**[https://nzlaw.linkiwise.com](https://nzlaw.linkiwise.com)** *(both desktop and mobile)*
+**[https://nzlaw.linkiwise.com](https://nzlaw.linkiwise.com)** *(desktop recommended)*
 
 Try asking:
 - *What is the current minimum wage in New Zealand?*
-- *How many days of annual leave am I entitled to?*
+- *How many sick days am I entitled to?*
+- *What is the gender pay gap in the healthcare sector?*
+- *Māori unemployment rate vs the national average?*
 - *I've been made redundant after 5 years — what am I owed?*
-- *What is a 90-day trial period and how does it work?*
-
----
-
-## About This Project
-
-This project was built as a complete end-to-end RAG application — from data pipeline design through to production deployment. The full development lifecycle covered: ideation, research, MVP scoping, PRD, implementation, testing, deployment, and validation.
-
-The system was originally prototyped with a Streamlit UI. It has since been refactored to a production architecture: a FastAPI backend serving a REST API, and a React/Next.js frontend deployed independently — with a clean separation of concerns and extensibility for future knowledge bases.
-
-<img width="1800" height="1240" alt="product-flow" src="https://github.com/user-attachments/assets/b3b351f9-22f7-4ba6-bbd2-b76fbc2db9f7" />
-
----
-
-## Features
-
-- ✅ Answers grounded in official NZ government legal documents
-- ✅ Source citations with URLs for every response — fully verifiable
-- ✅ Handles both simple factual questions and complex situational queries
-- ✅ Declines to answer when retrieved context is insufficient (no hallucination)
-- ✅ Production React/Next.js UI with topic-driven architecture
-- ✅ Privacy-first — no user data collected, sessions are ephemeral
+- *What industries have seen the most employment growth since 2020?*
 
 ---
 
 ## System Architecture
 
 ```
-Data Sources (NZ Government Websites)
-         │
-         ▼
-Recursive Web Crawler
-(1,283 URLs → 1,227 collected)
-         │
-         ▼
-Data Cleaning & Extraction
-(HTML + PDF → structured text)
-         │
-         ▼
-Chunking & Quality Scoring       ← tiktoken + LangChain splitter
-(1,960 chunks, 1,000 tokens avg)
-         │
-         ▼
-Vectorisation & Indexing         ← pipeline/build_vectorstore.py
-(ChromaDB + all-MiniLM-L6-v2)
-         │
-         ▼
-RAG Query System                 ← pipeline/rag_query.py
-(Semantic retrieval → Claude API → cited answer)
-         │
-         ▼
-FastAPI REST API                 ← api/main.py (Railway)
-(nzlaw-api.linkiwise.com)
-         │
-         ▼
-React / Next.js Frontend         ← github.com/LauraHFC/nz-employment-law-frontend (Vercel)
-(nzlaw.linkiwise.com)
+User natural language query
+        ↓
+  Query Router (Claude Haiku)
+  intent = legal / data / hybrid
+  ┌──────────┴──────────┐
+  ↓                     ↓
+Legal RAG Channel     Data SQL Channel
+Vector search         Haiku selects tables
+(ChromaDB)            → Sonnet generates SQL
+                      → DuckDB executes
+  └──────────┬──────────┘
+             ↓
+   Answer Generator (Claude Haiku)
+   Natural language answer + rule-based chart
+             ↓
+   HubQueryResponse (JSON)
+   answer / chart / sources / intent
+             ↓
+   Next.js frontend
+   Text + Recharts chart + Sources panel
 ```
 
 ---
 
-## Data Pipeline Details
+## Features
 
-### Phase 1 — Data Collection
+- ✅ Dual-channel retrieval: employment law documents + Stats NZ labour market data
+- ✅ Automatic intent routing — legal, data, or hybrid, handled transparently
+- ✅ Source citations with URLs for every legal response — fully verifiable
+- ✅ Interactive charts (line, bar, grouped bar, pie) for data answers
+- ✅ Handles complex hybrid questions combining law and statistics
+- ✅ Declines to answer when context is insufficient — no hallucination
+- ✅ Privacy-first — no user data collected, sessions are ephemeral
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| Language | Python 3.11 / TypeScript |
+| Query routing | Claude Haiku (3-class intent classification) |
+| SQL generation | Claude Sonnet (schema injection + few-shot) |
+| Answer generation | Claude Haiku (unified across all paths) |
+| Labour market data | Stats NZ — 11 tables · 25,274 rows · 2015–2025 |
+| Analytical database | DuckDB (columnar, embedded) |
+| Web crawling | requests, BeautifulSoup4 |
+| PDF extraction | pdfplumber |
+| Embeddings | sentence-transformers/all-MiniLM-L6-v2 |
+| Vector database | ChromaDB |
+| Backend API | FastAPI + uvicorn |
+| Frontend | React / Next.js 14 (TypeScript) + Recharts |
+| Backend deployment | Railway |
+| Frontend deployment | Vercel |
+
+---
+
+## Legal RAG Pipeline
+
+### Data Collection
 
 Automated collection from authoritative NZ government sources:
 
 **Results:** 1,283 URLs discovered → 1,227 successfully collected (95.6%) → 1,233 HTML/PDF files
 
-### Phase 2 — Cleaning & Chunking
+### Cleaning & Chunking
 
 - HTML parsed with BeautifulSoup4; PDFs extracted with pdfplumber (first 20 pages)
-- Text normalised with ftfy; unicode cleaned; boilerplate removed
-- Content typed as `legislation`, `case`, or `guide` for adaptive processing
-- Token-aware chunking with LangChain `RecursiveCharacterTextSplitter` + tiktoken
+- Content typed as `legislation`, `case`, or `guide` for adaptive chunking
 
 | Content Type | Chunk Size | Overlap |
 |---|---|---|
@@ -102,20 +113,17 @@ Automated collection from authoritative NZ government sources:
 | Case law | 1,100 tokens | 220 tokens |
 | Guidance | 1,000 tokens | 200 tokens |
 
-- MD5-based deduplication removed 202 redundant files
-- Legal keyword quality scoring to identify high-value chunks
+**Results:** 1,960 chunks, avg. 1,000 tokens each
 
-**Results:** 1,960 chunks generated, avg. 1,000 tokens each
+### Vectorisation & Retrieval
 
-### Phase 3 — Vectorisation
-
-- **Embedding model:** `sentence-transformers/all-MiniLM-L6-v2` (local, no API required, 33M params)
+- **Embedding model:** `sentence-transformers/all-MiniLM-L6-v2` (local, 33M params)
 - **Vector store:** ChromaDB with HNSW indexing and cosine similarity
-- **1,960 chunks embedded in 17.8 seconds** (110 chunks/second)
+- **1,960 chunks embedded in 17.8 seconds**
 
-### Phase 4 — Retrieval Validation
+### Retrieval Validation
 
-20-question test suite across 3 tiers before connecting the LLM:
+20-question test suite across 3 tiers:
 
 | Tier | Type | Count | Coverage |
 |------|------|-------|----------|
@@ -125,36 +133,56 @@ Automated collection from authoritative NZ government sources:
 
 **Overall retrieval coverage: 100% (20/20)**
 
-### Phase 5 — RAG Query System
-
-```python
-# Core flow
-def query(question):
-    docs, metas = retrieve(question, n_results=5)    # ChromaDB semantic search
-    answer, sources = generate(question, docs, metas) # Claude API with source attribution
-    return {"question": question, "answer": answer, "sources": sources}
-```
-
-System prompt instructs the model to: cite specific sections, be concise and practical, and explicitly decline when the answer is not in the retrieved documents.
-
 ---
 
-## Tech Stack
+## Text-to-SQL Pipeline
 
-| Layer | Technology |
-|-------|-----------|
-| Language | Python 3.11 |
-| Web crawling | requests, BeautifulSoup4 |
-| PDF extraction | pdfplumber |
-| Text processing | ftfy, tiktoken |
-| Chunking | LangChain RecursiveCharacterTextSplitter |
-| Embeddings | sentence-transformers/all-MiniLM-L6-v2 |
-| Vector database | ChromaDB |
-| LLM | Anthropic Claude API (claude-haiku-4-5) |
-| Backend API | FastAPI + uvicorn |
-| Frontend | React / Next.js 14 (TypeScript) |
-| Backend deployment | Railway |
-| Frontend deployment | Vercel |
+### Data
+
+11 Stats NZ Labour Market tables loaded into DuckDB, all following a unified long-format schema (`period | [dimension cols] | metric | value`):
+
+| Table | Coverage |
+|---|---|
+| `labour_force_status` | National employment / unemployment / participation rates |
+| `underutilisation` | Underutilisation by region |
+| `employed_by_industry` | Employment count by industry |
+| `employed_ft_pt_status` | Full-time vs part-time employment |
+| `filled_jobs_hours` | Filled jobs and paid hours by industry |
+| `gross_earnings` | Total gross earnings by industry |
+| `labour_cost_index` | Wage cost growth index by industry |
+| `avg_hourly_earnings` | Average hourly earnings by industry and gender |
+| `ethnicity_status` | Employment status by ethnicity |
+| `age_group_status` | Employment status by age group |
+| `earnings_by_qualification` | Weekly earnings by industry, gender, and qualification |
+
+**Data quality validation: 50 PASS / 0 FAIL** — including 9 cross-metric identity checks (unemployment rate formula, participation rate, industry summation totals) and real-world semantic checks (COVID shock visible in 2020, gender pay gap confirmed across all industries).
+
+### SQL Generation
+
+```
+Haiku selects 1–5 relevant tables from 11
+        ↓
+Focused schema prompt (60–90% fewer tokens than full schema)
++ 10 few-shot Q→SQL examples
+        ↓
+Sonnet generates DuckDB SQL
+        ↓
+Read-only guard (_assert_read_only + duckdb read_only=True)
+        ↓
+Execute + retry on error (max 2 retries)
+        ↓
+QueryResult → DataFrame
+```
+
+**Validation: 175 PASS / 0 FAIL** across schema metadata checks, few-shot SQL execution tests, and end-to-end pipeline integration tests.
+
+### Key design decisions
+
+**DuckDB over SQLite** — the workload is entirely analytical aggregations (OLAP). Columnar storage is 10–100x faster for this use case. A DB abstraction layer (`pipeline/db_engine.py`) supports switching to Snowflake or Databricks via a single environment variable.
+
+**Pure Prompt over LangChain SQL Agent** — every step is explicit and controllable. The schema metadata and few-shot examples are stored in separate files (`schema_context.py`, `few_shot_examples.py`) and loaded dynamically, mirroring the structure of enterprise RAG-over-SQL systems.
+
+**Rule-based chart engine** — chart type is inferred deterministically from the query result shape, rather than asking the LLM to decide. This proved more reliable in practice (Haiku ignored JSON structure instructions 100% of the time during development).
 
 ---
 
@@ -184,13 +212,13 @@ System prompt instructs the model to: cite specific sections, be concise and pra
 
 ## Cost Estimate
 
-Using Claude Haiku (most cost-effective model):
-
-| Usage | Estimated Cost |
-|-------|---------------|
-| Per query | ~$0.015 |
-| 100 queries/month | ~$1.50 |
-| 1,000 queries/month | ~$15 |
+| Component | Model | Cost per query |
+|---|---|---|
+| Query routing | Claude Haiku | ~$0.0002 |
+| Table selection | Claude Haiku | ~$0.0002 |
+| SQL generation | Claude Sonnet | ~$0.012 |
+| Answer generation | Claude Haiku | ~$0.002 |
+| **Total per query** | | **~$0.015** |
 
 ---
 
@@ -204,4 +232,4 @@ No user data is collected. All conversations are temporary and exist only in you
 
 ---
 
-*For informational purposes only — not legal advice. All information sourced from official New Zealand government websites. For serious employment matters, consult a qualified employment lawyer.*
+*For informational purposes only — not legal advice. All information sourced from official New Zealand government websites and Stats NZ. For serious employment matters, consult a qualified employment lawyer.*
