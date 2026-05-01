@@ -28,7 +28,6 @@ Try asking:
 - *What is the current minimum wage in New Zealand?*
 - *How many sick days am I entitled to?*
 - *What is the gender pay gap in the healthcare sector?*
-- *Māori unemployment rate vs the national average?*
 - *I've been made redundant after 5 years — what am I owed?*
 - *What industries have seen the most employment growth since 2020?*
 
@@ -264,7 +263,7 @@ No user data is collected. All conversations are temporary and exist only in you
 
 ---
 
-**Author:** Laura Cai · [Portfolio](https://linkiwise.com) · [LinkedIn](https://www.linkedin.com/in/laurahfc/)
+**Author:** Laura Cai · [LinkedIn](https://www.linkedin.com/in/laurahfc/)
 
 ---
 
