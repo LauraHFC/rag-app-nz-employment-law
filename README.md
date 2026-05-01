@@ -63,7 +63,7 @@ Vector search         Haiku selects tables
 
 ## Features
 
-- ✅ Dual-channel retrieval: employment law documents + some NZ labour market data
+- ✅ Dual-channel retrieval: employment law documents + Stats NZ labour market data
 - ✅ Automatic intent routing — legal, data, or hybrid, handled transparently
 - ✅ Source citations with URLs for every legal response — fully verifiable
 - ✅ Interactive charts (line, bar, grouped bar, pie) for data answers
@@ -94,13 +94,31 @@ Vector search         Haiku selects tables
 
 ---
 
+## AI Technologies Implemented
+
+- **Retrieval-Augmented Generation (RAG):** User questions are answered by embedding against 1,960 document chunks in ChromaDB, retrieving top-K matches, and feeding them into Claude Haiku for grounded synthesis with citations.
+
+- **Text-to-SQL:** Natural language data queries are converted by Claude Sonnet into DuckDB SQL, executed against 11 Stats NZ tables, and returned as structured results with optional charts.
+
+- **Multi-Source Retrieval Architecture:** Query Router (Haiku) classifies each question as legal/data/hybrid, automatically routing to the appropriate pipeline (RAG, SQL, or both in parallel).
+
+- **Model Routing:** Haiku handles lightweight tasks (intent classification, table selection, answer synthesis) while Sonnet tackles complex SQL generation, reducing per-query costs by ~80%.
+
+- **Schema-Driven Few-Shot Prompting:** SQL generation uses a focused schema (only selected tables) plus 10 real (question → SQL) examples from our Stats NZ data to improve correctness.
+
+- **Rule-Based Chart Type Inference:** Chart type is inferred deterministically from result shape (date → line, category → bar, etc.) rather than LLM decision, improving reliability.
+
+- **Deterministic Safety & Read-Only Query Enforcement:** All generated SQL is validated (`_assert_read_only()`) to block destructive queries, enforce table whitelisting, and guarantee SELECT-only access.
+
+---
+
 ## Legal RAG Pipeline
 
 ### Data Collection
 
 Automated collection from authoritative NZ government sources:
 
-**Results:**1,227 URLs successfully collected  → 1,233 HTML/PDF files
+**Results:** 1,283 URLs discovered → 1,227 successfully collected (95.6%) → 1,233 HTML/PDF files
 
 ### Cleaning & Chunking
 
@@ -119,7 +137,7 @@ Automated collection from authoritative NZ government sources:
 
 - **Embedding model:** `sentence-transformers/all-MiniLM-L6-v2` (local, 33M params)
 - **Vector store:** ChromaDB with HNSW indexing and cosine similarity
-- **1,960 chunks embedded **
+- **1,960 chunks embedded in 17.8 seconds**
 
 ### Retrieval Validation
 
@@ -139,7 +157,7 @@ Automated collection from authoritative NZ government sources:
 
 ### Data
 
-11 Stats NZ Labour Market tables loaded into **DuckDB**, all following a unified long-format schema (`period | [dimension cols] | metric | value`):
+11 Stats NZ Labour Market tables loaded into DuckDB, all following a unified long-format schema (`period | [dimension cols] | metric | value`):
 
 | Table | Coverage |
 |---|---|
@@ -160,12 +178,12 @@ Automated collection from authoritative NZ government sources:
 ### SQL Generation
 
 ```
-LLM(Haiku model) selects 1–5 relevant tables from 11
+Haiku selects 1–5 relevant tables from 11
         ↓
 Focused schema prompt (60–90% fewer tokens than full schema)
 + 10 few-shot Q→SQL examples
         ↓
-LLM(Sonnet model) generates DuckDB SQL
+Sonnet generates DuckDB SQL
         ↓
 Read-only guard (_assert_read_only + duckdb read_only=True)
         ↓
@@ -186,6 +204,24 @@ QueryResult → DataFrame
 
 ---
 
+## Testing & Evaluation
+
+Each pipeline stage has dedicated validation to ensure quality:
+
+**RAG Retrieval** — 20-question test suite across 3 tiers (basic facts, synthesis, edge cases). Tests validate knowledge base coverage through keyword matching against 1,960 chunks. Reports generated in JSON and Markdown format. Run with `python tests/run_retrieval_tests.py`.
+
+**Text-to-SQL Pipeline** — 175 automated tests across 3 layers: (1) smoke tests on all 11 table types, (2) edge cases and stress tests, (3) regression tests from few-shot examples. Each test validates row counts, column existence, value ranges, nulls, and ordering. Run with `python -m tests.quality_test`.
+
+**Answer Generation** — Unit tests validate synthesis logic, source attribution, and chart type inference. Run with `pytest tests/test_answer_generator.py`.
+
+**Query Router** — Classification accuracy tests ensure intent detection (legal/data/hybrid) on representative queries. Run with `pytest tests/test_query_router.py`.
+
+**End-to-End Hub** — Integration smoke tests validate the full pipeline from natural language input through final response. Run with `pytest tests/test_hub_smoke.py`.
+
+**Data Quality** — 50 validation checks on Stats NZ tables including cross-metric identity checks (unemployment rate formula, industry summation totals) and real-world semantic checks (COVID visible in 2020, gender pay gap confirmed).
+
+---
+
 ## Repositories
 
 | Repo | Description |
@@ -200,7 +236,7 @@ QueryResult → DataFrame
 | Service | URL | Platform |
 |---------|-----|----------|
 | Frontend | [nzlaw.linkiwise.com](https://nzlaw.linkiwise.com) | Vercel |
-| Backend API | Railway |
+| Backend API | [nzlaw-api.linkiwise.com](https://nzlaw-api.linkiwise.com) | Railway |
 
 ### Environment Variables (Backend)
 
@@ -228,7 +264,7 @@ No user data is collected. All conversations are temporary and exist only in you
 
 ---
 
-**Author:** Laura Cai · [LinkedIn](https://www.linkedin.com/in/laurahfc/)
+**Author:** Laura Cai · [Portfolio](https://linkiwise.com) · [LinkedIn](https://www.linkedin.com/in/laurahfc/)
 
 ---
 
