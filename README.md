@@ -22,7 +22,7 @@ Every legal answer includes the source document and URL so you can verify it you
 
 ## Live Demo
 
-**[https://nzlaw.linkiwise.com](https://nzlaw.linkiwise.com)** *(desktop recommended)*
+**[https://nzlaw.linkiwise.com](https://nzlaw.linkiwise.com)** *(avaliable on both both desktop and mobile)*
 
 Try asking:
 - *What is the current minimum wage in New Zealand?*
