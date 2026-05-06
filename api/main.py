@@ -107,8 +107,17 @@ def _ensure_tax_vectorstore() -> None:
         import shutil
         shutil.rmtree(tax_dir)
 
+    # Cloudflare R2's pub-*.r2.dev development URLs reject the default
+    # Python-urllib User-Agent (returns 403). Send a browser-like UA instead.
+    req = urllib.request.Request(
+        url,
+        headers={"User-Agent": "Mozilla/5.0 (compatible; nzlaw-api/1.0)"},
+    )
     with tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False) as tmp:
-        urllib.request.urlretrieve(url, tmp.name)
+        with urllib.request.urlopen(req) as resp:
+            while chunk := resp.read(1024 * 1024):  # 1 MB chunks
+                tmp.write(chunk)
+        tmp.flush()
         log.info("Downloaded %d bytes, extracting...", Path(tmp.name).stat().st_size)
         with tarfile.open(tmp.name, "r:gz") as tar:
             tar.extractall(path=project_root / "data")
