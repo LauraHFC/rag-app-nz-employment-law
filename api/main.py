@@ -1,4 +1,6 @@
-# api/main.py — FastAPI wrapper around RAGSystem (§3.2 handoff doc)
+# api/main.py — FastAPI wrapper
+# v2: risk-control pipeline wired in (intent classifier, crisis detector,
+#     output guard, consent_events audit, answer_audit).
 
 import json
 import os
@@ -6,7 +8,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 # ── Add project root to path so pipeline imports work ─────────────────────────
@@ -14,6 +16,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from pipeline.rag_query import RAGSystem  # noqa: E402
 
 from api.models import (  # noqa: E402
+    AgentQueryRequest,
+    AgentQueryResponse,
+    AgentSource,
+    ConsentAcknowledgeRequest,
+    ConsentAcknowledgeResponse,
     FeedbackRequest,
     FeedbackResponse,
     HealthResponse,
@@ -23,23 +30,27 @@ from api.models import (  # noqa: E402
     TopicInfo,
     TopicsResponse,
 )
+from api.db import init_db, log_consent_event, log_answer_audit  # noqa: E402
 
 # ── Intelligence Hub router (Phase 3) ─────────────────────────────────────────
 from api.intelligence_hub import hub_router  # noqa: E402
 
+
 # ── App setup ──────────────────────────────────────────────────────────────────
 app = FastAPI(
-    title="NZ Employment Intelligence Hub API",
-    version="2.0.0",
+    title="NZ Employment & Tax Law API",
+    version="4.0.0",
     description=(
-        "NZ Employment Intelligence Hub. "
-        "Original RAG endpoint: POST /api/query. "
-        "New unified endpoint: POST /api/hub/query (auto-routes legal / data / hybrid). "
+        "NZ Employment & Tax Law Intelligence Hub. "
+        "v4: full risk-control pipeline (crisis detection, intent classification, "
+        "output guard, consent audit). "
+        "Agent endpoint: POST /api/agent/query. "
+        "Consent endpoint: POST /api/consent/acknowledge. "
         "See /docs for interactive API explorer."
     ),
 )
 
-# ── CORS (§6.3 handoff doc) ───────────────────────────────────────────────────
+# ── CORS ───────────────────────────────────────────────────────────────────────
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -48,19 +59,26 @@ app.add_middleware(
         "http://localhost:3000",
         "http://localhost:3001",
     ],
-
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["Content-Type"],
     allow_credentials=False,
 )
 
+# ── Startup ────────────────────────────────────────────────────────────────────
+@app.on_event("startup")
+def startup() -> None:
+    """Initialise audit DB on startup (idempotent — safe to run every boot)."""
+    try:
+        init_db()
+    except Exception as exc:
+        # Log but do not crash the app — audit DB failure should not block serving
+        import logging
+        logging.getLogger(__name__).error("Audit DB init failed: %s", exc)
+
+
 # ── RAG system singleton ──────────────────────────────────────────────────────
-# Loaded once at startup; shared across all requests.
 _rag: RAGSystem | None = None
-
-# Vectorstore path — same location used by pipeline/rag_query.py
 VS_DIR = Path(__file__).parent.parent / "data" / "vectorstore"
-
 
 def get_rag() -> RAGSystem:
     global _rag
@@ -70,8 +88,6 @@ def get_rag() -> RAGSystem:
 
 
 # ── Topic registry ────────────────────────────────────────────────────────────
-# Add new topics here when the backend team onboards a new knowledge base.
-# The frontend reads this dynamically — no frontend code change required.
 TOPICS: list[TopicInfo] = [
     TopicInfo(
         id="nz_employment_law",
@@ -80,18 +96,13 @@ TOPICS: list[TopicInfo] = [
         chunk_count=1960,
         active=True,
     ),
-    # TopicInfo(id="health_safety", label="Health & Safety", ..., active=False),
 ]
-
-# Map topic ID → ChromaDB collection name (do not rename the existing collection)
 TOPIC_COLLECTION_MAP: dict[str, str] = {
     "nz_employment_law": "nz_employment_law",
 }
-
-# Feedback log path
 FEEDBACK_LOG = Path(__file__).parent.parent / "data" / "feedback_log.jsonl"
 
-# ── Mount Intelligence Hub router ─────────────────────────────────────────────
+# Mount Intelligence Hub router
 app.include_router(hub_router)
 
 
@@ -99,13 +110,11 @@ app.include_router(hub_router)
 
 @app.get("/api/health", response_model=HealthResponse, summary="Liveness check")
 def health() -> HealthResponse:
-    """Returns 200 when the vectorstore is loaded and the Claude API key is set."""
     try:
         rag = get_rag()
         chunks_loaded = rag.collection.count() if hasattr(rag, "collection") else 0
         model = getattr(rag, "model", "claude-haiku-4-5-20251001")
-        api_key_set = bool(os.getenv("ANTHROPIC_API_KEY"))
-        if not api_key_set:
+        if not os.getenv("ANTHROPIC_API_KEY"):
             raise RuntimeError("ANTHROPIC_API_KEY not set")
         return HealthResponse(status="ok", chunks_loaded=chunks_loaded, model=model)
     except Exception as exc:
@@ -114,30 +123,16 @@ def health() -> HealthResponse:
 
 @app.get("/api/topics", response_model=TopicsResponse, summary="List available knowledge bases")
 def list_topics() -> TopicsResponse:
-    """
-    Returns all registered knowledge bases.
-    The frontend calls this on load to populate the topic selector.
-    When a new topic is added, update TOPICS above — no frontend change needed.
-    """
     return TopicsResponse(topics=TOPICS)
 
 
-@app.post("/api/query", response_model=QueryResponse, summary="Ask a question")
+@app.post("/api/query", response_model=QueryResponse, summary="Ask a question (legacy RAG)")
 def query(req: QueryRequest) -> QueryResponse:
-    """
-    Submit a question to the RAG pipeline.
-
-    - **question**: Natural language question (max 2000 chars)
-    - **topic**: Knowledge base ID from GET /api/topics (required)
-    - **n_results**: Number of source chunks to retrieve (default 5)
-    """
-    # Validate topic
     if req.topic not in TOPIC_COLLECTION_MAP:
         raise HTTPException(
             status_code=422,
             detail=f"Unknown topic '{req.topic}'. Valid topics: {list(TOPIC_COLLECTION_MAP)}",
         )
-
     try:
         result = get_rag().query(req.question, n_results=req.n_results)
     except Exception as exc:
@@ -152,7 +147,6 @@ def query(req: QueryRequest) -> QueryResponse:
         )
         for s in result.get("sources", [])
     ]
-
     return QueryResponse(
         answer=result.get("answer", ""),
         sources=sources,
@@ -160,12 +154,176 @@ def query(req: QueryRequest) -> QueryResponse:
     )
 
 
+# ── Consent acknowledgement ───────────────────────────────────────────────────
+
+@app.post(
+    "/api/consent/acknowledge",
+    response_model=ConsentAcknowledgeResponse,
+    summary="Log disclaimer modal acknowledgement or decline",
+    tags=["Consent"],
+)
+def consent_acknowledge(
+    body: ConsentAcknowledgeRequest,
+    request: Request,
+) -> ConsentAcknowledgeResponse:
+    """
+    Called by the frontend when the user clicks "I accept" or "I disagree"
+    on the first-message disclaimer modal.
+
+    - IP is hashed server-side with a rotating monthly salt.
+    - The raw IP is never stored.
+    - Returns the generated event_id for client-side correlation if needed.
+    """
+    ip_raw = request.client.host if request.client else None
+
+    event_id = log_consent_event(
+        session_id=body.session_id,
+        event_type=body.event_type,
+        checkbox_states=body.checkbox_states,
+        user_id=body.user_id,
+        user_agent=body.user_agent,
+        ip_raw=ip_raw,
+        ui_locale=body.ui_locale,
+        question_hash=body.question_hash,
+        disclaimer_version=body.disclaimer_version,
+        privacy_policy_version=body.privacy_policy_version,
+    )
+    return ConsentAcknowledgeResponse(ok=True, event_id=event_id)
+
+
+# ── Agent query ───────────────────────────────────────────────────────────────
+
+@app.post(
+    "/api/agent/query",
+    response_model=AgentQueryResponse,
+    summary="Ask a question (employment + tax, full risk-control pipeline)",
+    tags=["Agent"],
+)
+def agent_query(req: AgentQueryRequest) -> AgentQueryResponse:
+    """
+    Submit a question to the v2 agent pipeline.
+
+    Pipeline stages:
+    1. Pre-flight regex refusal (legacy belt-and-suspenders, fast)
+    2. Crisis detector (self-harm / family violence → crisis card;
+       immigration / criminal → REFUSE_WITH_REFERRAL; imminent → HIGH_STAKES)
+    3. Intent + domain classifier (Haiku, LOOKUP / ADVICE / HIGH_STAKES × tier)
+    4. Routing matrix (domain_tier × intent_class → template)
+    5. Tool routing (Sonnet, selects employment / tax / labour_stats tools)
+    6. Parallel retrieval
+    7. Template-aware synthesis (Haiku)
+    8. Output guard (banned phrases, section headings, risk footer)
+    9. Answer audit logging
+
+    All refused questions return `refused: true` with a warm referral message.
+    """
+    from pipeline.refusal_router import should_refuse
+    from pipeline.citation_validator import validate
+    from pipeline.agent_router import run as agent_run, SYNTHESIS_MODEL
+
+    # ── Stage 1: pre-flight regex refusal (fast, no API call) ────────────────
+    refusal = should_refuse(req.question)
+    if refusal.refused:
+        log_answer_audit(
+            intent_class="ADVICE",
+            intent_confidence=1.0,
+            domain_tier="M",
+            domain_label="other",
+            routing_outcome="REFUSE_WITH_REFERRAL",
+            model="refusal_router",
+            citations=[],
+            banned_phrase_hits=[],
+            regeneration_count=0,
+            refused=True,
+            crisis_route_fired=False,
+        )
+        return AgentQueryResponse(
+            answer=refusal.message,
+            sources=[],
+            domains_used=[],
+            tool_calls=[],
+            refused=True,
+            refusal_reason=refusal.reason,
+            chart=None,
+            question=req.question,
+            intent_class="ADVICE",
+            domain_tier="M",
+            domain_label="other",
+            routing_outcome="REFUSE_WITH_REFERRAL",
+            crisis_route_fired=False,
+            regeneration_count=0,
+            risk_badge="refused",
+        )
+
+    # ── Stages 2–8: full agent pipeline ──────────────────────────────────────
+    try:
+        result = agent_run(
+            question=req.question,
+            api_key=os.getenv("ANTHROPIC_API_KEY"),
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Agent pipeline failed: {exc}") from exc
+
+    # ── Stage 9: answer audit ────────────────────────────────────────────────
+    log_answer_audit(
+        intent_class=result.intent_class,
+        intent_confidence=result.classifier_confidence,
+        domain_tier=result.domain_tier,
+        domain_label=result.domain_label,
+        routing_outcome=result.routing_outcome,
+        model=SYNTHESIS_MODEL,
+        citations=[
+            {"title": s.get("title", ""), "url": s.get("url", "")}
+            for s in result.sources
+        ],
+        banned_phrase_hits=result.banned_phrase_hits,
+        regeneration_count=result.regeneration_count,
+        refused=result.refused,
+        crisis_route_fired=result.crisis_route_fired,
+    )
+
+    # ── Citation URL allowlist validation ────────────────────────────────────
+    raw_sources = [
+        {
+            "title": s.get("title", ""),
+            "url": s.get("url", ""),
+            "content_type": s.get("content_type", "guide"),
+        }
+        for s in result.sources
+    ]
+    validated = validate(raw_sources)
+    sources = [
+        AgentSource(
+            title=s["title"],
+            url=s["url"],
+            content_type=s.get("content_type", "guide"),
+        )
+        for s in validated.valid_sources
+    ]
+
+    return AgentQueryResponse(
+        answer=result.answer,
+        sources=sources,
+        domains_used=result.domains_used,
+        tool_calls=result.tool_calls,
+        refused=result.refused,
+        refusal_reason=result.refusal_reason,
+        chart=result.chart,
+        question=req.question,
+        intent_class=result.intent_class,
+        domain_tier=result.domain_tier,
+        domain_label=result.domain_label,
+        routing_outcome=result.routing_outcome,
+        crisis_route_fired=result.crisis_route_fired,
+        regeneration_count=result.regeneration_count,
+        risk_badge=result.risk_badge,
+    )
+
+
+# ── Feedback ──────────────────────────────────────────────────────────────────
+
 @app.post("/api/feedback", response_model=FeedbackResponse, summary="Log user feedback")
 def feedback(req: FeedbackRequest) -> FeedbackResponse:
-    """
-    Log a thumbs-up or thumbs-down rating for an answer.
-    Appends to data/feedback_log.jsonl — one JSON object per line.
-    """
     try:
         FEEDBACK_LOG.parent.mkdir(parents=True, exist_ok=True)
         record = {
@@ -177,7 +335,5 @@ def feedback(req: FeedbackRequest) -> FeedbackResponse:
         with FEEDBACK_LOG.open("a", encoding="utf-8") as f:
             f.write(json.dumps(record) + "\n")
     except Exception as exc:
-        # Best-effort — log but don't fail the request
         print(f"[feedback] Failed to write log: {exc}", flush=True)
-
     return FeedbackResponse(status="logged")
