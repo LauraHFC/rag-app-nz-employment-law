@@ -39,3 +39,6 @@ ENV/
 
 # Logs
 *.log
+
+# Tax vector store too large for git — downloaded from Cloudflare R2 at startup
+data/vectorstore_tax/

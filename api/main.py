@@ -64,16 +64,77 @@ app.add_middleware(
     allow_credentials=False,
 )
 
+# ── Vector store bootstrap (download from R2 if missing) ──────────────────────
+def _ensure_tax_vectorstore() -> None:
+    """
+    Ensure the tax vector store is present locally.
+
+    The tax vector store is too large to ship in git (>100 MB). It is hosted
+    on Cloudflare R2 and downloaded once on first boot, then cached on the
+    container's local disk for the remainder of that container's lifetime.
+
+    Controlled via env var TAX_VECTORSTORE_URL (e.g. a public R2 URL pointing
+    to a .tar.gz of the vectorstore_tax directory). If the env var is unset,
+    this function is a no-op (useful for local dev where the dir already
+    exists).
+    """
+    import logging
+    log = logging.getLogger(__name__)
+
+    project_root = Path(__file__).parent.parent
+    tax_dir = project_root / "data" / "vectorstore_tax"
+    sentinel = tax_dir / "chroma.sqlite3"
+
+    # Already present and looks real (>1 KB rules out an LFS pointer file)
+    if sentinel.exists() and sentinel.stat().st_size > 1024:
+        log.info("Tax vector store already present at %s", tax_dir)
+        return
+
+    url = os.environ.get("TAX_VECTORSTORE_URL")
+    if not url:
+        log.warning(
+            "TAX_VECTORSTORE_URL not set and tax vector store missing — "
+            "tax queries will fail until vectorstore is provisioned."
+        )
+        return
+
+    log.info("Downloading tax vector store from %s ...", url)
+    import urllib.request, tarfile, tempfile
+
+    tax_dir.parent.mkdir(parents=True, exist_ok=True)
+    # Wipe any partial/LFS-pointer state
+    if tax_dir.exists():
+        import shutil
+        shutil.rmtree(tax_dir)
+
+    with tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False) as tmp:
+        urllib.request.urlretrieve(url, tmp.name)
+        log.info("Downloaded %d bytes, extracting...", Path(tmp.name).stat().st_size)
+        with tarfile.open(tmp.name, "r:gz") as tar:
+            tar.extractall(path=project_root / "data")
+        Path(tmp.name).unlink(missing_ok=True)
+
+    log.info("Tax vector store ready at %s", tax_dir)
+
+
 # ── Startup ────────────────────────────────────────────────────────────────────
 @app.on_event("startup")
 def startup() -> None:
-    """Initialise audit DB on startup (idempotent — safe to run every boot)."""
+    """Initialise audit DB and download tax vector store on startup."""
     try:
         init_db()
     except Exception as exc:
         # Log but do not crash the app — audit DB failure should not block serving
         import logging
         logging.getLogger(__name__).error("Audit DB init failed: %s", exc)
+
+    try:
+        _ensure_tax_vectorstore()
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).error(
+            "Tax vector store bootstrap failed: %s — tax queries will fail.", exc
+        )
 
 
 # ── RAG system singleton ──────────────────────────────────────────────────────
