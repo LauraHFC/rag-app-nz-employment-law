@@ -73,10 +73,15 @@ def _ensure_tax_vectorstore() -> None:
     on Cloudflare R2 and downloaded once on first boot, then cached on the
     container's local disk for the remainder of that container's lifetime.
 
-    Controlled via env var TAX_VECTORSTORE_URL (e.g. a public R2 URL pointing
-    to a .tar.gz of the vectorstore_tax directory). If the env var is unset,
-    this function is a no-op (useful for local dev where the dir already
-    exists).
+    Controlled via env vars:
+      - TAX_VECTORSTORE_URL — public R2 URL pointing to a .tar.gz of the
+        vectorstore_tax directory. If unset, this function is a no-op
+        (useful for local dev where the dir already exists).
+      - TAX_VECTORSTORE_VERSION — an arbitrary version string (e.g. "v2",
+        "2026-05-07-clean"). When this changes, the existing on-disk
+        vectorstore is wiped and re-downloaded. This is the mechanism for
+        forcing Railway to pick up a new tar.gz after replacing it on R2.
+        If unset, falls back to legacy behaviour: download only when missing.
     """
     import logging
     log = logging.getLogger(__name__)
@@ -84,10 +89,32 @@ def _ensure_tax_vectorstore() -> None:
     project_root = Path(__file__).parent.parent
     tax_dir = project_root / "data" / "vectorstore_tax"
     sentinel = tax_dir / "chroma.sqlite3"
+    version_file = tax_dir / ".version"
 
-    # Already present and looks real (>1 KB rules out an LFS pointer file)
-    if sentinel.exists() and sentinel.stat().st_size > 1024:
-        log.info("Tax vector store already present at %s", tax_dir)
+    expected_version = os.environ.get("TAX_VECTORSTORE_VERSION")
+
+    # Decide whether the existing on-disk copy is acceptable.
+    on_disk_ok = sentinel.exists() and sentinel.stat().st_size > 1024
+    version_match = True
+    if expected_version is not None:
+        actual_version = (
+            version_file.read_text().strip()
+            if version_file.exists()
+            else None
+        )
+        version_match = actual_version == expected_version
+        if on_disk_ok and not version_match:
+            log.info(
+                "Tax vector store version mismatch (have=%r, want=%r) — "
+                "wiping and re-downloading.",
+                actual_version, expected_version,
+            )
+
+    if on_disk_ok and version_match:
+        log.info(
+            "Tax vector store already present at %s (version=%s)",
+            tax_dir, expected_version or "unversioned",
+        )
         return
 
     url = os.environ.get("TAX_VECTORSTORE_URL")
@@ -102,7 +129,7 @@ def _ensure_tax_vectorstore() -> None:
     import urllib.request, tarfile, tempfile
 
     tax_dir.parent.mkdir(parents=True, exist_ok=True)
-    # Wipe any partial/LFS-pointer state
+    # Wipe any partial/LFS-pointer/old-version state
     if tax_dir.exists():
         import shutil
         shutil.rmtree(tax_dir)
@@ -123,7 +150,17 @@ def _ensure_tax_vectorstore() -> None:
             tar.extractall(path=project_root / "data")
         Path(tmp.name).unlink(missing_ok=True)
 
-    log.info("Tax vector store ready at %s", tax_dir)
+    # Stamp the version so future restarts know what's on disk.
+    if expected_version is not None:
+        try:
+            version_file.write_text(expected_version)
+        except Exception as exc:
+            log.warning("Failed to write .version file: %s", exc)
+
+    log.info(
+        "Tax vector store ready at %s (version=%s)",
+        tax_dir, expected_version or "unversioned",
+    )
 
 
 # ── Startup ────────────────────────────────────────────────────────────────────
