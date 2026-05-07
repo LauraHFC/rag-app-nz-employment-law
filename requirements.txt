@@ -14,4 +14,4 @@ duckdb>=0.10.0
 pandas>=2.0.0
 
 # RAG embeddings
-sentence-transformers>=2.2.0
+sentence-transformers>=2.2.0tabulate
