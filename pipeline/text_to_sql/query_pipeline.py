@@ -49,6 +49,7 @@ from typing import Optional
 
 import pandas as pd
 
+from api.observability import observe
 from pipeline.db_engine import get_engine
 from pipeline.text_to_sql.table_selector import (
     TableSelectionResult,
@@ -322,6 +323,7 @@ def infer_chart_config(df: pd.DataFrame, query: str) -> Optional[dict]:
 # Orchestrator
 # ---------------------------------------------------------------------------
 
+@observe(name="sql")
 def run_query(
     query: str,
     api_key: str | None = None,

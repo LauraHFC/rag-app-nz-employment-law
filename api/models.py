@@ -1,5 +1,6 @@
 # api/models.py — Pydantic request/response models
 # v2: risk-control fields added to AgentQueryResponse; ConsentAcknowledgeRequest added.
+# v3: trace_id added to AgentQueryResponse; FeedbackRequest updated for Langfuse scores.
 
 from pydantic import BaseModel, Field
 from typing import Any, Literal
@@ -14,9 +15,9 @@ class QueryRequest(BaseModel):
 
 
 class FeedbackRequest(BaseModel):
-    question: str = Field(..., min_length=1)
+    trace_id: str = Field(..., min_length=1, description="Langfuse trace ID from the query response")
     rating: Literal["up", "down"]
-    topic: str = Field(..., description="Knowledge base ID")
+    comment: str | None = Field(None, max_length=1000)
 
 
 # ── Response models ────────────────────────────────────────────────────────────
@@ -113,6 +114,8 @@ class AgentQueryResponse(BaseModel):
     crisis_route_fired: bool = False
     regeneration_count: int = 0
     risk_badge: str = "general_info"
+    # Observability (Sprint 5)
+    trace_id: str | None = None
 
 
 # ── Consent / audit models (risk controls, v2) ────────────────────────────────

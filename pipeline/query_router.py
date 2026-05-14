@@ -45,6 +45,8 @@ from typing import Literal, Optional
 
 import anthropic
 
+from api.observability import observe
+
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
@@ -117,6 +119,7 @@ class RouteResult:
 # Classifier
 # ---------------------------------------------------------------------------
 
+@observe(name="route")
 def classify_query(
     query: str,
     api_key: str | None = None,

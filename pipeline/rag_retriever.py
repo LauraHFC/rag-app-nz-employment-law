@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Optional
 
 from pipeline.rag_query import RAGSystem
+from api.observability import observe
 
 log = logging.getLogger(__name__)
 
@@ -53,6 +54,7 @@ def _get_rag(vectorstore_path: Path | None = None) -> RAGSystem:
 # Public API
 # ---------------------------------------------------------------------------
 
+@observe(name="retrieve")
 def retrieve(
     query: str,
     n_results: int = 5,

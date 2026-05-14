@@ -44,6 +44,7 @@ from pipeline.query_router import RouteResult, classify_query
 from pipeline.text_to_sql.query_pipeline import QueryResult, run_query
 from pipeline.rag_retriever import RAGContext, retrieve as rag_retrieve
 from pipeline.answer_generator import RetrievalContext, GeneratedAnswer, generate as generate_answer
+from api.observability import observe
 
 # ---------------------------------------------------------------------------
 # Router setup
@@ -128,23 +129,19 @@ def hub_query(req: HubQueryRequest) -> HubQueryResponse:
     if not api_key:
         raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not set")
 
-    # ------------------------------------------------------------------
-    # Step 1: Classify intent
-    # ------------------------------------------------------------------
-    route: RouteResult = classify_query(req.question, api_key=api_key)
+    # Wrap in @observe so inner spans (route/retrieve/sql/generate) nest under it.
+    # FastAPI route functions cannot themselves be decorated with @observe.
+    @observe(name="hub_query")
+    def _run() -> HubQueryResponse:
+        route: RouteResult = classify_query(req.question, api_key=api_key)
+        if route.intent == "legal":
+            return _handle_legal(req, route, api_key)
+        elif route.intent == "data":
+            return _handle_data(req, route, api_key)
+        else:
+            return _handle_hybrid(req, route, api_key)
 
-    # ------------------------------------------------------------------
-    # Step 2: Route to pipeline(s)
-    # ------------------------------------------------------------------
-
-    if route.intent == "legal":
-        return _handle_legal(req, route, api_key)
-
-    elif route.intent == "data":
-        return _handle_data(req, route, api_key)
-
-    else:  # hybrid
-        return _handle_hybrid(req, route, api_key)
+    return _run()
 
 
 # ---------------------------------------------------------------------------

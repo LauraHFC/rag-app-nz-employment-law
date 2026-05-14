@@ -52,6 +52,8 @@ from typing import Any
 
 import anthropic
 
+from api.observability import observe
+
 from pipeline.crisis_detector import detect as crisis_detect, CrisisResult
 from pipeline.intent_classifier import classify as intent_classify, ClassifierResult
 from pipeline.output_guard import (
@@ -535,6 +537,7 @@ def _dispatch_tool(tool_name: str, tool_input: dict) -> Any:
 # Routing step (Sonnet picks tools)
 # ---------------------------------------------------------------------------
 
+@observe(name="route")
 def _route(
     client: anthropic.Anthropic,
     question: str,
@@ -577,6 +580,7 @@ def _route(
 # Tool execution (parallel)
 # ---------------------------------------------------------------------------
 
+@observe(name="retrieve")
 def _execute_tools(tool_calls: list[dict]) -> list[Any]:
     from pipeline.tools.employment_search import ToolResult
 
@@ -607,6 +611,7 @@ def _execute_tools(tool_calls: list[dict]) -> list[Any]:
 # Synthesis step
 # ---------------------------------------------------------------------------
 
+@observe(as_type="generation", name="generate")
 def _synthesise(
     client: anthropic.Anthropic,
     question: str,
@@ -705,6 +710,7 @@ def _synthesise(
 # Public API
 # ---------------------------------------------------------------------------
 
+@observe(name="agent_query")
 def run(question: str, api_key: str | None = None) -> AgentResponse:
     """
     Run the full v2 agent pipeline for a user question.

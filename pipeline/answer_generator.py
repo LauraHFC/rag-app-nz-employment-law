@@ -21,6 +21,8 @@ from typing import Optional
 import anthropic
 import pandas as pd
 
+from api.observability import observe
+
 log = logging.getLogger(__name__)
 
 
@@ -100,6 +102,7 @@ def _format_data_context(df: pd.DataFrame, tables_used: list[str]) -> str:
 # Public API
 # ---------------------------------------------------------------------------
 
+@observe(as_type="generation", name="generate")
 def generate(ctx: RetrievalContext, api_key: str | None = None) -> GeneratedAnswer:
     """
     Generate a unified answer from a RetrievalContext.

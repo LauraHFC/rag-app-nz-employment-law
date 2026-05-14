@@ -1,6 +1,7 @@
 # api/main.py — FastAPI wrapper
 # v2: risk-control pipeline wired in (intent classifier, crisis detector,
 #     output guard, consent_events audit, answer_audit).
+# v3: Langfuse observability added (Sprint 5). trace_id in AgentQueryResponse.
 
 import json
 import os
@@ -31,6 +32,7 @@ from api.models import (  # noqa: E402
     TopicsResponse,
 )
 from api.db import init_db, log_consent_event, log_answer_audit  # noqa: E402
+from api.observability import get_trace_id, observe  # noqa: E402
 
 # ── Intelligence Hub router (Phase 3) ─────────────────────────────────────────
 from api.intelligence_hub import hub_router  # noqa: E402
@@ -360,6 +362,7 @@ def agent_query(req: AgentQueryRequest) -> AgentQueryResponse:
             crisis_route_fired=False,
             regeneration_count=0,
             risk_badge="refused",
+            trace_id=get_trace_id(),
         )
 
     # ── Stages 2–8: full agent pipeline ──────────────────────────────────────
@@ -424,6 +427,7 @@ def agent_query(req: AgentQueryRequest) -> AgentQueryResponse:
         crisis_route_fired=result.crisis_route_fired,
         regeneration_count=result.regeneration_count,
         risk_badge=result.risk_badge,
+        trace_id=get_trace_id(),
     )
 
 
@@ -431,16 +435,43 @@ def agent_query(req: AgentQueryRequest) -> AgentQueryResponse:
 
 @app.post("/api/feedback", response_model=FeedbackResponse, summary="Log user feedback")
 def feedback(req: FeedbackRequest) -> FeedbackResponse:
+    """
+    Log user thumbs-up / thumbs-down feedback against a Langfuse trace.
+
+    The frontend sends the trace_id it received from /api/agent/query so
+    the score is attached to the exact span that produced the answer.
+
+    Belt-and-braces: also writes to the local JSONL as a fallback, but
+    this file is ephemeral on Railway — Langfuse is the durable store.
+    """
+    from api.observability import _langfuse_enabled, _lf_get_client  # local import
+
+    score_value = 1 if req.rating == "up" else -1
+
+    # ── Primary: Langfuse score ────────────────────────────────────────────
+    if _langfuse_enabled and _lf_get_client is not None:
+        try:
+            _lf_get_client().score(
+                trace_id=req.trace_id,
+                name="user_feedback",
+                value=score_value,
+                comment=req.comment or "",
+            )
+        except Exception as exc:
+            print(f"[feedback] Langfuse score failed: {exc}", flush=True)
+
+    # ── Belt-and-braces: local JSONL (ephemeral on Railway, safe to lose) ──
     try:
         FEEDBACK_LOG.parent.mkdir(parents=True, exist_ok=True)
         record = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "question": req.question,
+            "trace_id": req.trace_id,
             "rating": req.rating,
-            "topic": req.topic,
+            "comment": req.comment,
         }
         with FEEDBACK_LOG.open("a", encoding="utf-8") as f:
             f.write(json.dumps(record) + "\n")
     except Exception as exc:
-        print(f"[feedback] Failed to write log: {exc}", flush=True)
+        print(f"[feedback] JSONL write failed (non-critical): {exc}", flush=True)
+
     return FeedbackResponse(status="logged")
