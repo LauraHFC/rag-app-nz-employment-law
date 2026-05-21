@@ -74,28 +74,32 @@ class AgentSource(BaseModel):
 
 class AgentQueryResponse(BaseModel):
     """
-    Response from POST /api/agent/query (v2 — risk-control fields added).
+    Response from POST /api/agent/query (Sprint 6 — slimmed).
+
+    Sprint 6 dropped these fields (torn out with the over-engineered risk
+    control pipeline): intent_class, domain_tier, routing_outcome,
+    classifier_confidence, risk_badge. They were nullable-ed clean rather
+    than left as dead schema, per Laura's call.
 
     Core answer fields:
-        answer          — synthesised answer text (includes risk footer verbatim)
+        answer          — synthesised answer text (includes single-line LIGHT footer)
         sources         — cited sources (URL-allowlist validated)
         domains_used    — which tool(s) contributed: "employment", "tax", "labour_stats"
         tool_calls      — routing decisions (telemetry / debug; not shown in UI)
-        refused         — True if the question was refused
+        refused         — True if the question was refused (drives the only
+                          place the risk badge now renders in the UI)
         refusal_reason  — short reason string when refused=True
         chart           — ChartConfig dict from labour stats tool, or null
         question        — echo of the original question
 
-    Risk-control metadata (v2):
-        intent_class        — LOOKUP | ADVICE | HIGH_STAKES
-        domain_tier         — H1 | H2 | H3 | M | L
-        domain_label        — employment | tax | immigration | ...
-        routing_outcome     — DIRECT_ANSWER | STRUCTURED_INFORMATIONAL |
-                              STRUCTURED_ADVICE_SKELETON | REFUSE_WITH_REFERRAL
+    Slim risk-control metadata:
+        domain_label        — employment | tax | other | active_proceeding |
+                              immigration | criminal | wills_estates | ...
         crisis_route_fired  — True if crisis detector triggered
         regeneration_count  — how many times output_guard regenerated the answer
-        risk_badge          — general_info | high_care | please_get_advice | refused
-                              (drives the per-message badge colour in the UI)
+
+    Observability:
+        trace_id            — Langfuse trace id for /api/feedback to attach a score
     """
     # Core
     answer: str
@@ -106,14 +110,10 @@ class AgentQueryResponse(BaseModel):
     refusal_reason: str | None = None
     chart: dict[str, Any] | None = None
     question: str
-    # Risk-control metadata
-    intent_class: str = "LOOKUP"
-    domain_tier: str = "M"
+    # Slim risk-control metadata
     domain_label: str = "other"
-    routing_outcome: str = "DIRECT_ANSWER"
     crisis_route_fired: bool = False
     regeneration_count: int = 0
-    risk_badge: str = "general_info"
     # Observability (Sprint 5)
     trace_id: str | None = None
 

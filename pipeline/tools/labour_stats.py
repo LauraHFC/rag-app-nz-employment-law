@@ -103,6 +103,24 @@ def execute(inputs: dict) -> ToolResult:
             },
         )
 
+    except ImportError as exc:
+        # Distinguishes env / dependency problems from runtime SQL errors.
+        # Without this branch, a missing duckdb (or other dep) surfaces as a
+        # generic "SQL execution error: No module named X", which is hard to
+        # tell apart from a real SQL failure in eval traces.
+        log.error(
+            "[query_labour_market_stats] DEPENDENCY MISSING — labour_stats "
+            "cannot run. Install requirements.txt in the API server venv. "
+            "Detail: %s", exc,
+        )
+        return ToolResult(
+            tool_name="query_labour_market_stats",
+            success=False,
+            domain="labour_stats",
+            error=f"Labour-market dependency missing: {exc}. "
+                  f"Run `pip install -r requirements.txt` in the API server venv.",
+        )
+
     except Exception as exc:
         log.exception("[query_labour_market_stats] Unexpected error: %s", exc)
         return ToolResult(

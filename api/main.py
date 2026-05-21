@@ -32,7 +32,12 @@ from api.models import (  # noqa: E402
     TopicsResponse,
 )
 from api.db import init_db, log_consent_event, log_answer_audit  # noqa: E402
-from api.observability import get_trace_id, observe  # noqa: E402
+from api.observability import (  # noqa: E402
+    get_trace_id,
+    observe,
+    eval_trace_context,
+    flush as _langfuse_flush,
+)
 
 # ── Intelligence Hub router (Phase 3) ─────────────────────────────────────────
 from api.intelligence_hub import hub_router  # noqa: E402
@@ -185,6 +190,26 @@ def startup() -> None:
         )
 
 
+# ── Shutdown ───────────────────────────────────────────────────────────────────
+@app.on_event("shutdown")
+def shutdown() -> None:
+    """Flush Langfuse batch exporter before process exit.
+
+    Without this, the OpenTelemetry batch exporter that ships traces to
+    Langfuse can lose any events still in its in-memory queue when the
+    server is Ctrl-C'd. This is why the Sprint 5 v2 baseline run
+    (2026-05-16) only saw 2/36 traces in Langfuse despite all 36 returning
+    HTTP 200 locally.
+    """
+    try:
+        _langfuse_flush()
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning(
+            "[observability] flush on shutdown failed (non-fatal): %s", exc
+        )
+
+
 # ── RAG system singleton ──────────────────────────────────────────────────────
 _rag: RAGSystem | None = None
 VS_DIR = Path(__file__).parent.parent / "data" / "vectorstore"
@@ -305,111 +330,87 @@ def consent_acknowledge(
 @app.post(
     "/api/agent/query",
     response_model=AgentQueryResponse,
-    summary="Ask a question (employment + tax, full risk-control pipeline)",
+    summary="Ask a question (employment + tax, Sprint 6 slim pipeline)",
     tags=["Agent"],
 )
-def agent_query(req: AgentQueryRequest) -> AgentQueryResponse:
+def agent_query(req: AgentQueryRequest, request: Request) -> AgentQueryResponse:
     """
-    Submit a question to the v2 agent pipeline.
+    Submit a question to the agent pipeline (Sprint 6 slimmed).
 
     Pipeline stages:
-    1. Pre-flight regex refusal (legacy belt-and-suspenders, fast)
-    2. Crisis detector (self-harm / family violence → crisis card;
-       immigration / criminal → REFUSE_WITH_REFERRAL; imminent → HIGH_STAKES)
-    3. Intent + domain classifier (Haiku, LOOKUP / ADVICE / HIGH_STAKES × tier)
-    4. Routing matrix (domain_tier × intent_class → template)
-    5. Tool routing (Sonnet, selects employment / tax / labour_stats tools)
-    6. Parallel retrieval
-    7. Template-aware synthesis (Haiku)
-    8. Output guard (banned phrases, section headings, risk footer)
-    9. Answer audit logging
+    1. Crisis detector (self-harm / family violence → crisis card or REFUSE)
+    2. Pre-flight regex refusal (narrow 4-category set:
+       active_proceeding / immigration / criminal / wills_estates)
+    3. Tool routing (Sonnet picks employment / tax / labour_stats tools)
+    4. Parallel retrieval
+    5. Unified synthesis (Haiku — one prompt, shape follows complexity)
+    6. Output guard (banned phrases + LIGHT footer)
+    7. Answer audit logging
 
-    All refused questions return `refused: true` with a warm referral message.
+    Sprint 6 removed: intent classifier, 15-cell ROUTING_MATRIX, 4 synthesis
+    templates, mandatory 7-section headings, tiered footers, risk_badge tiers.
+    All refused questions return `refused: true` with a warm referral message
+    and the UI renders the risk badge only in that case.
     """
-    from pipeline.refusal_router import should_refuse
     from pipeline.citation_validator import validate
     from pipeline.agent_router import run as agent_run, SYNTHESIS_MODEL
 
-    # ── Stage 1: pre-flight regex refusal (fast, no API call) ────────────────
-    refusal = should_refuse(req.question)
-    if refusal.refused:
+    # The pre-flight refusal step is now part of the agent_router pipeline
+    # itself (Sprint 6) — main.py no longer duplicates it.
+
+    # ── Eval tagging: open the propagate_attributes scope BEFORE any pipeline
+    #    work. The context manager reads X-Eval-* headers; if present, it
+    #    propagates env=eval + run/question/pipeline/outcome/difficulty tags
+    #    to every @observe span created inside this block. Production requests
+    #    (no X-Eval-* headers) hit a transparent no-op. ───────────────────────
+    with eval_trace_context(request.headers):
+        # ── Run the full agent pipeline ──────────────────────────────────────
+        try:
+            result = agent_run(
+                question=req.question,
+                api_key=os.getenv("ANTHROPIC_API_KEY"),
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Agent pipeline failed: {exc}") from exc
+
+        # ── Answer audit (slim — Sprint 6) ───────────────────────────────────
         log_answer_audit(
-            intent_class="ADVICE",
-            intent_confidence=1.0,
-            domain_tier="M",
-            domain_label="other",
-            routing_outcome="REFUSE_WITH_REFERRAL",
-            model="refusal_router",
-            citations=[],
-            banned_phrase_hits=[],
-            regeneration_count=0,
-            refused=True,
-            crisis_route_fired=False,
-        )
-        return AgentQueryResponse(
-            answer=refusal.message,
-            sources=[],
-            domains_used=[],
-            tool_calls=[],
-            refused=True,
-            refusal_reason=refusal.reason,
-            chart=None,
-            question=req.question,
-            intent_class="ADVICE",
-            domain_tier="M",
-            domain_label="other",
-            routing_outcome="REFUSE_WITH_REFERRAL",
-            crisis_route_fired=False,
-            regeneration_count=0,
-            risk_badge="refused",
-            trace_id=get_trace_id(),
+            domain_label=result.domain_label,
+            model=SYNTHESIS_MODEL,
+            citations=[
+                {"title": s.get("title", ""), "url": s.get("url", "")}
+                for s in result.sources
+            ],
+            banned_phrase_hits=result.banned_phrase_hits,
+            regeneration_count=result.regeneration_count,
+            refused=result.refused,
+            refusal_reason=result.refusal_reason,
+            crisis_route_fired=result.crisis_route_fired,
         )
 
-    # ── Stages 2–8: full agent pipeline ──────────────────────────────────────
-    try:
-        result = agent_run(
-            question=req.question,
-            api_key=os.getenv("ANTHROPIC_API_KEY"),
-        )
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Agent pipeline failed: {exc}") from exc
-
-    # ── Stage 9: answer audit ────────────────────────────────────────────────
-    log_answer_audit(
-        intent_class=result.intent_class,
-        intent_confidence=result.classifier_confidence,
-        domain_tier=result.domain_tier,
-        domain_label=result.domain_label,
-        routing_outcome=result.routing_outcome,
-        model=SYNTHESIS_MODEL,
-        citations=[
-            {"title": s.get("title", ""), "url": s.get("url", "")}
+        # ── Citation URL allowlist validation ────────────────────────────────
+        raw_sources = [
+            {
+                "title": s.get("title", ""),
+                "url": s.get("url", ""),
+                "content_type": s.get("content_type", "guide"),
+            }
             for s in result.sources
-        ],
-        banned_phrase_hits=result.banned_phrase_hits,
-        regeneration_count=result.regeneration_count,
-        refused=result.refused,
-        crisis_route_fired=result.crisis_route_fired,
-    )
+        ]
+        validated = validate(raw_sources)
+        sources = [
+            AgentSource(
+                title=s["title"],
+                url=s["url"],
+                content_type=s.get("content_type", "guide"),
+            )
+            for s in validated.valid_sources
+        ]
 
-    # ── Citation URL allowlist validation ────────────────────────────────────
-    raw_sources = [
-        {
-            "title": s.get("title", ""),
-            "url": s.get("url", ""),
-            "content_type": s.get("content_type", "guide"),
-        }
-        for s in result.sources
-    ]
-    validated = validate(raw_sources)
-    sources = [
-        AgentSource(
-            title=s["title"],
-            url=s["url"],
-            content_type=s.get("content_type", "guide"),
-        )
-        for s in validated.valid_sources
-    ]
+        # NOTE: get_trace_id() must be called INSIDE the propagate_attributes
+        # context, before all @observe spans have detached. Once the `with`
+        # block ends the OTel context is torn down and the helper returns None.
+        captured_trace_id = get_trace_id()
 
     return AgentQueryResponse(
         answer=result.answer,
@@ -420,14 +421,10 @@ def agent_query(req: AgentQueryRequest) -> AgentQueryResponse:
         refusal_reason=result.refusal_reason,
         chart=result.chart,
         question=req.question,
-        intent_class=result.intent_class,
-        domain_tier=result.domain_tier,
         domain_label=result.domain_label,
-        routing_outcome=result.routing_outcome,
         crisis_route_fired=result.crisis_route_fired,
         regeneration_count=result.regeneration_count,
-        risk_badge=result.risk_badge,
-        trace_id=get_trace_id(),
+        trace_id=captured_trace_id,
     )
 
 

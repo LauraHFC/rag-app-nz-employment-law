@@ -1,0 +1,31 @@
+-- 002_sprint6_slim_audit.sql
+-- Sprint 6 — drop over-engineered risk-control columns from answer_audit.
+-- "Drop clean" per Laura's call (no nullable preservation).
+--
+-- Safe to run on a fresh DB (the 001 script already creates the slim schema,
+-- so the DROP COLUMN statements below silently no-op — wrapped in
+-- IF EXISTS-style guards via a temp helper view that won't fire if the
+-- column is already gone). SQLite doesn't actually support
+-- "ALTER TABLE … DROP COLUMN IF EXISTS", so this script is wrapped in a
+-- transaction with column existence checks at the Python migration runner
+-- layer instead (see api/db.py init_db()).
+--
+-- Idempotency strategy:
+--   The runner inspects PRAGMA table_info(answer_audit) and only emits
+--   the DROP/ADD statements for columns that currently exist / are missing.
+--   So this .sql file is mostly documentation of intent — the actual
+--   schema reconciliation is done in code.
+
+-- Reference schema after Sprint 6 (what 001_risk_controls.sql already creates
+-- for fresh installs):
+--   message_id, conversation_id, user_id,
+--   domain_label,
+--   prompt_version, model,
+--   citations, banned_phrase_hits,
+--   regeneration_count, refused, refusal_reason, crisis_route_fired,
+--   created_at
+
+-- Columns to remove if present on an existing DB:
+--   intent_class, intent_confidence, domain_tier, routing_outcome
+-- Columns to add if missing on an existing DB:
+--   refusal_reason TEXT NULL

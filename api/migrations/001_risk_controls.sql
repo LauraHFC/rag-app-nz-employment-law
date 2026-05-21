@@ -44,37 +44,28 @@ CREATE INDEX IF NOT EXISTS consent_events_type_idx
 
 
 -- ── Per-answer audit ──────────────────────────────────────────────────────────
--- One row per assistant response. Captures full risk-control metadata.
+-- One row per assistant response. Captures slim risk-control metadata.
+-- Sprint 6: dropped intent_class, intent_confidence, domain_tier, routing_outcome
+-- (over-engineered risk control fields). Added refusal_reason.
 CREATE TABLE IF NOT EXISTS answer_audit (
   message_id             TEXT PRIMARY KEY,
   conversation_id        TEXT NOT NULL,
   user_id                TEXT NULL,
-  intent_class           TEXT NOT NULL
-                           CHECK (intent_class IN ('LOOKUP','ADVICE','HIGH_STAKES')),
-  intent_confidence      REAL NOT NULL,
-  domain_tier            TEXT NOT NULL
-                           CHECK (domain_tier IN ('H1','H2','H3','M','L')),
   domain_label           TEXT NOT NULL,
-  routing_outcome        TEXT NOT NULL
-                           CHECK (routing_outcome IN (
-                             'DIRECT_ANSWER',
-                             'STRUCTURED_INFORMATIONAL',
-                             'STRUCTURED_ADVICE_SKELETON',
-                             'REFUSE_WITH_REFERRAL'
-                           )),
-  prompt_version         TEXT NOT NULL DEFAULT '1.0',
+  prompt_version         TEXT NOT NULL DEFAULT '2.0',
   model                  TEXT NOT NULL,
   -- JSON arrays stored as text for SQLite compatibility
   citations              TEXT NOT NULL DEFAULT '[]',
   banned_phrase_hits     TEXT NOT NULL DEFAULT '[]',
   regeneration_count     INTEGER NOT NULL DEFAULT 0,
   refused                INTEGER NOT NULL DEFAULT 0  CHECK (refused IN (0,1)),
+  refusal_reason         TEXT NULL,
   crisis_route_fired     INTEGER NOT NULL DEFAULT 0  CHECK (crisis_route_fired IN (0,1)),
   created_at             TEXT NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS answer_audit_outcome_idx
-  ON answer_audit (routing_outcome, created_at DESC);
+CREATE INDEX IF NOT EXISTS answer_audit_domain_idx
+  ON answer_audit (domain_label, created_at DESC);
 
 CREATE INDEX IF NOT EXISTS answer_audit_created_idx
   ON answer_audit (created_at DESC);
@@ -84,6 +75,9 @@ CREATE INDEX IF NOT EXISTS answer_audit_crisis_idx
 
 CREATE INDEX IF NOT EXISTS answer_audit_regen_idx
   ON answer_audit (regeneration_count, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS answer_audit_refused_idx
+  ON answer_audit (refused, created_at DESC);
 
 
 -- ── Source registry ───────────────────────────────────────────────────────────

@@ -1,11 +1,41 @@
 """
 pipeline/refusal_router.py
 ===========================
-Pre-flight refusal check run BEFORE the agent router is called.
+Pre-flight refusal check run BEFORE the agent router calls the routing model.
+
+Sprint 6 — scope narrowed to 4 regex-detectable categories.
 
 This is a fast, rule-based (regex) filter for the most obvious refusal
-categories.  The routing model's system prompt handles nuanced refusals;
-this module catches clear-cut cases without spending a Sonnet API call.
+categories. The routing model handles "out of scope" decisions for everything
+else; this module only catches narrow, clear-cut cases where regex is more
+reliable than letting the LLM decide.
+
+Sprint 6 retains 4 of the original 5 categories and drops the others:
+
+Retained (4):
+    ACTIVE_PROCEEDING   — personal grievance filed, ERA/court matter, IRD audit underway
+    IMMIGRATION         — regulated activity in NZ (licensed advisers only)
+    CRIMINAL            — criminal defence requires a qualified lawyer
+    WILLS_ESTATES       — reserved area requiring a qualified lawyer
+
+Dropped:
+    OUT_OF_SCOPE_TAX    — let the routing model judge tax scope based on the
+                          tool descriptions; regex was over-firing on questions
+                          like "is GST a trust tax?" that mention trust keywords.
+    OUT_OF_SCOPE_OTHER  — same logic: the routing model already refuses
+                          out-of-scope domains with `{"refused": true,
+                          "reason": "out of scope"}`.
+    INDIVIDUAL_ADVICE   — second-person framing is caught by the banned-phrase
+                          guard in the output stage; preempting at the input
+                          stage biases conservative and was the Sprint 4
+                          over-engineering pattern.
+    FILING_SPECIFIC     — these are answerable as general info; only true
+                          form-filling cases would refuse, and the unified
+                          prompt handles them gracefully.
+
+Note: mental_health and family_violence crises are caught by crisis_detector
+before refusal_router runs. They're tracked in Sprint 6's "6 narrow refuse
+categories" list but live in a different module.
 
 Usage:
     from pipeline.refusal_router import should_refuse, RefusalResult
@@ -15,15 +45,8 @@ Usage:
         return AgentResponse(
             answer=result.message,
             refused=True,
-            refusal_reason=result.reason,
+            refusal_reason=result.category.lower(),
         )
-
-Refusal categories:
-    ACTIVE_PROCEEDING   — personal grievance filed, ERA/court matter, IRD audit underway
-    OUT_OF_SCOPE_TAX    — trusts, international tax, double-tax treaties, FBT
-    OUT_OF_SCOPE_OTHER  — criminal law, immigration (non-employment), property, insurance
-    INDIVIDUAL_ADVICE   — "should I", "will I win", outcome prediction requests
-    FILING_SPECIFIC     — "which box on IR3", form-line questions (IRD form-filling)
 """
 
 from __future__ import annotations
@@ -40,12 +63,12 @@ from dataclasses import dataclass
 class RefusalResult:
     refused: bool
     reason: str = ""          # short machine-readable reason
-    category: str = ""        # ACTIVE_PROCEEDING | OUT_OF_SCOPE_TAX | etc.
+    category: str = ""        # ACTIVE_PROCEEDING | IMMIGRATION | CRIMINAL | WILLS_ESTATES
     message: str = ""         # human-readable response to show the user
 
 
 # ---------------------------------------------------------------------------
-# Pattern groups
+# Pattern groups (4 narrow categories)
 # ---------------------------------------------------------------------------
 
 _ACTIVE_PROCEEDING_PATTERNS = [
@@ -64,40 +87,28 @@ _ACTIVE_PROCEEDING_PATTERNS = [
     r"\bin\s+(dispute|litigation)\s+with\s+(IRD|Inland\s+Revenue)\b",
 ]
 
-_OUT_OF_SCOPE_TAX_PATTERNS = [
-    r"\b(trusts?|family\s+trusts?|discretionary\s+trusts?|bare\s+trusts?)\b",
-    r"\b(double[\s-]tax\s+agreement|DTA|double[\s-]tax\s+treat(y|ies))\b",
-    r"\b(international\s+tax|cross[\s-]border\s+tax|transfer\s+pricing)\b",
-    r"\b(foreign\s+tax\s+credit|FTC)\b",
-    r"\b(thin\s+capitalisation|interest\s+deductibility\s+limit)\b",
-    r"\b(FBT|fringe\s+benefit\s+tax)\b",
-    r"\b(estate\s+duty|gift\s+duty|land\s+transfer\s+tax|brightline)\b",
-    r"\b(crypto(currency)?|bitcoin|NFT).{0,20}\b(tax|GST|return)\b",
+_IMMIGRATION_PATTERNS = [
+    r"\b(immigration\s+visa|work\s+visa|residency\s+application|residence\s+visa)\b",
+    r"\b(visa\s+application|visa\s+status|visa\s+sponsorship)\b",
+    r"\b(skilled\s+migrant|accredited\s+employer)\b.{0,20}\b(visa|application)\b",
+    r"\b(deportation|removal\s+order|immigration\s+detention)\b",
+    r"\b(INZ|Immigration\s+New\s+Zealand)\b.{0,30}\b(application|appeal|decision)\b",
 ]
 
-_OUT_OF_SCOPE_OTHER_PATTERNS = [
-    r"\b(criminal|criminal\s+law|criminal\s+charge|prosecution)\b",
-    r"\b(family\s+court|custody|divorce|separation\s+agreement)\b",
-    r"\b(resource\s+consent|RMA|resource\s+management)\b",
-    r"\b(property\s+law|conveyancing|title\s+search)\b",
-    r"\b(immigration\s+visa|work\s+visa|residency\s+application)\b",
-    r"\b(insurance\s+claim|ACC\s+dispute|personal\s+injury\s+claim)\b",
-    r"\b(company\s+law|shareholders?\s+agreement|constitution)\b",
+_CRIMINAL_PATTERNS = [
+    r"\b(criminal\s+charge|criminal\s+case|criminal\s+prosecution)\b",
+    r"\b(arrested|charged\s+with|prosecuted\s+for|convicted\s+of)\b",
+    r"\b(bail|remand|sentencing|plea)\b.{0,30}\b(hearing|application|advice)\b",
+    r"\b(police\s+interview|police\s+questioning|cautioned\s+by\s+police)\b",
+    r"\b(criminal\s+defence|criminal\s+defense|criminal\s+lawyer)\b",
 ]
 
-_INDIVIDUAL_ADVICE_PATTERNS = [
-    r"\bwill\s+I\s+win\b",
-    r"\bdo\s+I\s+have\s+a\s+(good\s+)?case\b",
-    r"\bshould\s+I\s+(sue|take\s+them\s+to|file|raise)\b",
-    r"\bwhat\s+are\s+my\s+chances\b",
-    r"\bwill\s+the\s+(ERA|court|IRD)\s+(rule|decide|find)\s+in\s+my\s+fav(ou?r)?\b",
-    r"\bhow\s+much\s+(compensation|damages|money)\s+will\s+I\s+get\b",
-]
-
-_FILING_SPECIFIC_PATTERNS = [
-    r"\bwhich\s+(box|field|line|section)\s+on\s+\b(IR\d+|my\s+tax\s+return)\b",
-    r"\bhow\s+do\s+I\s+fill\s+(in|out)\s+(IR\d+|the\s+IR\d+|my\s+IR\d+)\b",
-    r"\bIR\d{1,4}\s+(box|field|question)\s+\d+\b",
+_WILLS_ESTATES_PATTERNS = [
+    r"\b(will\s+drafting|drafting\s+a\s+will|write\s+a\s+will|writing\s+my\s+will)\b",
+    r"\b(estate\s+planning|estate\s+administration|estate\s+distribution)\b",
+    r"\b(probate|letters\s+of\s+administration|grant\s+of\s+probate)\b",
+    r"\b(executor|trustee\s+of\s+estate|administrator\s+of\s+estate)\b",
+    r"\b(family\s+protection\s+act|testamentary\s+(promises|claim))\b",
 ]
 
 
@@ -110,16 +121,15 @@ def _compile_group(patterns: list[str]) -> list[re.Pattern]:
 
 
 _COMPILED = {
-    # Check outcome-prediction first — "will I win my ERA case?" is INDIVIDUAL_ADVICE,
-    # not ACTIVE_PROCEEDING (even though it mentions ERA).
-    "INDIVIDUAL_ADVICE":  _compile_group(_INDIVIDUAL_ADVICE_PATTERNS),
-    "FILING_SPECIFIC":    _compile_group(_FILING_SPECIFIC_PATTERNS),
     "ACTIVE_PROCEEDING":  _compile_group(_ACTIVE_PROCEEDING_PATTERNS),
-    "OUT_OF_SCOPE_TAX":   _compile_group(_OUT_OF_SCOPE_TAX_PATTERNS),
-    "OUT_OF_SCOPE_OTHER": _compile_group(_OUT_OF_SCOPE_OTHER_PATTERNS),
+    "IMMIGRATION":        _compile_group(_IMMIGRATION_PATTERNS),
+    "CRIMINAL":           _compile_group(_CRIMINAL_PATTERNS),
+    "WILLS_ESTATES":      _compile_group(_WILLS_ESTATES_PATTERNS),
 }
 
-# Human-readable messages per category
+# Human-readable messages per category. (Note: agent_router rebuilds the actual
+# refusal text via Haiku + REFERRAL_BANK; these messages are only used if a
+# caller invokes refusal_router directly without going through agent_router.)
 _MESSAGES = {
     "ACTIVE_PROCEEDING": (
         "This service provides general information about NZ employment law and tax law. "
@@ -130,30 +140,26 @@ _MESSAGES = {
         "• IRD: 0800 775 247\n"
         "• Citizens Advice Bureau: 0800 367 222"
     ),
-    "OUT_OF_SCOPE_TAX": (
-        "This service covers NZ income tax, GST, KiwiSaver, and employer tax obligations. "
-        "The topic you've asked about (such as trusts, international tax, or FBT) is outside "
-        "our current scope. For specialist tax advice, please consult a chartered accountant "
-        "or tax advisor, or contact IRD on 0800 775 247."
+    "IMMIGRATION": (
+        "Immigration advice is a regulated activity in New Zealand — only licensed "
+        "immigration advisers and lawyers can provide it. For help with your visa or "
+        "residency application, please contact:\n"
+        "• Immigration NZ: immigration.govt.nz\n"
+        "• IAA register of licensed advisers: iaa.govt.nz"
     ),
-    "OUT_OF_SCOPE_OTHER": (
-        "This service covers NZ employment law and NZ tax law. "
-        "The topic you've asked about appears to be outside these areas. "
-        "For other legal matters, please contact a NZ-qualified lawyer or "
-        "Citizens Advice Bureau (0800 367 222)."
+    "CRIMINAL": (
+        "Advice on criminal-defence matters requires a qualified lawyer who can act for you. "
+        "Please contact:\n"
+        "• Police Detention Legal Assistance scheme\n"
+        "• Legal Aid: legalaid.govt.nz\n"
+        "• Community Law: communitylaw.org.nz"
     ),
-    "INDIVIDUAL_ADVICE": (
-        "This service provides general information about NZ employment law and tax law — "
-        "it cannot predict outcomes for specific situations or provide legal/tax advice. "
-        "For advice about your specific situation, please contact:\n"
-        "• Employment NZ: 0800 20 90 20\n"
-        "• IRD: 0800 775 247\n"
-        "• A NZ-qualified employment lawyer or tax advisor"
-    ),
-    "FILING_SPECIFIC": (
-        "This service provides general guidance on NZ tax law, but cannot assist with "
-        "specific form fields or tax return line items. For help completing your tax return, "
-        "please contact IRD on 0800 775 247 or visit ird.govt.nz."
+    "WILLS_ESTATES": (
+        "Will drafting and estate planning are reserved areas of legal work that require a "
+        "qualified lawyer. For tailored help, please contact:\n"
+        "• A NZ-qualified lawyer\n"
+        "• Public Trust: publictrust.co.nz\n"
+        "• Community Law: communitylaw.org.nz"
     ),
 }
 
@@ -170,8 +176,8 @@ def should_refuse(question: str) -> RefusalResult:
         question: The user's raw question string.
 
     Returns:
-        RefusalResult with refused=True if the question matches a refusal category,
-        or refused=False if it should proceed to the agent router.
+        RefusalResult with refused=True if the question matches one of the 4
+        narrow refusal categories, or refused=False if it should proceed.
     """
     for category, patterns in _COMPILED.items():
         for pattern in patterns:

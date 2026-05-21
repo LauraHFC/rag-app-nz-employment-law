@@ -63,8 +63,14 @@ def get_db() -> sqlite3.Connection:
 
 def init_db() -> None:
     """
-    Create tables and seed banned_phrases.
+    Create tables, seed banned_phrases, and reconcile schema for Sprint 6.
     Uses CREATE TABLE IF NOT EXISTS + INSERT OR IGNORE so re-running is safe.
+
+    Sprint 6 reconciliation (only applies to pre-existing DBs):
+      - DROP COLUMN intent_class, intent_confidence, domain_tier, routing_outcome
+      - ADD COLUMN refusal_reason TEXT NULL
+    SQLite ≥ 3.35 supports ALTER TABLE … DROP COLUMN. Wrapped in PRAGMA-driven
+    existence checks to stay idempotent.
     """
     _DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     sql = _MIGRATION.read_text(encoding="utf-8")
@@ -72,6 +78,52 @@ def init_db() -> None:
     conn = get_db()
     try:
         conn.executescript(sql)
+        conn.commit()
+
+        # Sprint 6 schema reconciliation
+        existing_cols = {
+            row["name"] for row in conn.execute("PRAGMA table_info(answer_audit)").fetchall()
+        }
+        # Indexes that reference now-removed columns must be dropped FIRST,
+        # otherwise SQLite refuses to DROP COLUMN.
+        legacy_indexes_to_drop = [
+            ("answer_audit_outcome_idx", "routing_outcome"),
+        ]
+        for idx_name, dependent_col in legacy_indexes_to_drop:
+            if dependent_col in existing_cols:
+                try:
+                    conn.execute(f"DROP INDEX IF EXISTS {idx_name}")
+                except sqlite3.OperationalError as exc:
+                    log.warning("[db] Could not drop legacy index %s: %s", idx_name, exc)
+
+        cols_to_drop = [
+            "intent_class",
+            "intent_confidence",
+            "domain_tier",
+            "routing_outcome",
+        ]
+        for col in cols_to_drop:
+            if col in existing_cols:
+                try:
+                    conn.execute(f"ALTER TABLE answer_audit DROP COLUMN {col}")
+                    log.info("[db] Sprint 6 migration: dropped column answer_audit.%s", col)
+                except sqlite3.OperationalError as exc:
+                    log.warning(
+                        "[db] Could not drop answer_audit.%s (requires SQLite ≥ 3.35): %s",
+                        col, exc,
+                    )
+        if "refusal_reason" not in existing_cols:
+            # Only add if the table existed before AND the column was missing.
+            # On fresh installs the 001 script already created it.
+            post_create_cols = {
+                row["name"] for row in conn.execute(
+                    "PRAGMA table_info(answer_audit)"
+                ).fetchall()
+            }
+            if "refusal_reason" not in post_create_cols:
+                conn.execute("ALTER TABLE answer_audit ADD COLUMN refusal_reason TEXT NULL")
+                log.info("[db] Sprint 6 migration: added column answer_audit.refusal_reason")
+
         conn.commit()
         log.info("[db] Audit database initialised at %s", _DB_PATH)
     except Exception as exc:
@@ -159,23 +211,25 @@ def log_consent_event(
 
 def log_answer_audit(
     *,
-    intent_class: str,
-    intent_confidence: float,
-    domain_tier: str,
     domain_label: str,
-    routing_outcome: str,
     model: str,
     citations: list[dict],
     banned_phrase_hits: list[str],
     regeneration_count: int,
     refused: bool,
+    refusal_reason: str | None,
     crisis_route_fired: bool,
     conversation_id: str | None = None,
     user_id: str | None = None,
-    prompt_version: str = "1.0",
+    prompt_version: str = "2.0",
 ) -> str:
     """
     Insert one row into answer_audit.
+
+    Sprint 6 — schema slimmed: dropped intent_class, intent_confidence,
+    domain_tier, routing_outcome (over-engineered risk control fields).
+    Added refusal_reason (short reason string when refused=1).
+
     Returns the generated message_id (UUID).
     Best-effort: logs errors but does not raise.
     """
@@ -189,37 +243,32 @@ def log_answer_audit(
             """
             INSERT INTO answer_audit
               (message_id, conversation_id, user_id,
-               intent_class, intent_confidence,
-               domain_tier, domain_label, routing_outcome,
-               prompt_version, model,
+               domain_label, prompt_version, model,
                citations, banned_phrase_hits,
-               regeneration_count, refused, crisis_route_fired,
-               created_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+               regeneration_count, refused, refusal_reason,
+               crisis_route_fired, created_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             [
                 message_id,
                 conversation_id,
                 user_id,
-                intent_class,
-                round(float(intent_confidence), 4),
-                domain_tier,
                 domain_label,
-                routing_outcome,
                 prompt_version,
                 model,
                 json.dumps(citations),
                 json.dumps(banned_phrase_hits),
                 int(regeneration_count),
                 int(refused),
+                refusal_reason,
                 int(crisis_route_fired),
                 created_at,
             ],
         )
         conn.commit()
         log.info(
-            "[db] answer_audit logged: message_id=%s outcome=%s regen=%d",
-            message_id, routing_outcome, regeneration_count,
+            "[db] answer_audit logged: message_id=%s domain=%s refused=%s regen=%d",
+            message_id, domain_label, refused, regeneration_count,
         )
     except Exception as exc:
         log.exception("[db] answer_audit insert failed: %s", exc)

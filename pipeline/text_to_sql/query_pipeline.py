@@ -416,6 +416,10 @@ def run_query(
         try:
             with get_engine() as db:
                 exec_result = db.query(current_sql)
+        except ImportError:
+            # Env / dependency problem (e.g. duckdb not installed). Bubble up
+            # so the caller can distinguish "missing dep" from "bad SQL".
+            raise
         except Exception as e:
             last_error = f"SQL execution error: {e}"
             _log(f"  ERROR: {last_error}")
