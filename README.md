@@ -1,6 +1,6 @@
 # NZ Law Compass
 
-An AI-powered Q&A system for New Zealand employment law, tax law, and labour market data — multi-domain RAG and Text-to-SQL pipelines, governed by a focused risk-control pipeline with crisis detection, a narrow refusal set, an output guard, and full audit logging. Live at **[nzlaw.linkiwise.com](https://nzlaw.linkiwise.com)**.
+An AI-powered Q&A system for New Zealand employment law, tax law, and labour market data — multi-domain RAG and Text-to-SQL pipelines, governed by a focused risk-control pipeline with crisis detection, a narrow refusal set, an output guard, and full audit logging. Answer quality is governed by a dedicated evaluation system: Langfuse tracing and span-level observability, a frozen test set scored by an LLM-as-judge, and a hard acceptance gate. Live at **[nzlaw.linkiwise.com](https://nzlaw.linkiwise.com)**.
 
 > ⚖️ For informational purposes only — not legal or tax advice. For serious matters, consult a qualified professional.
 
@@ -35,9 +35,29 @@ Try asking:
 
 ---
 
-## Risk-Control Architecture (Sprint 6)
+## Features
 
-Sprint 4 shipped a 9-stage pipeline: a Haiku intent classifier, a 15-cell routing matrix, four synthesis templates, and forced 7-section legal-memo headings. In practice that machinery turned simple questions into walls of text — the structure was load-bearing in the wrong direction. **Sprint 6 tore it down and rebuilt it as a focused 6-step pipeline:** one unified synthesis prompt that lets answer shape follow question complexity, a narrow refusal set, and a single light footer.
+- ✅ Multi-domain knowledge federation: employment law + tax law + labour market data, behind one agent endpoint
+- ✅ Claude tool-use routing — automatic, supports cross-domain queries in one turn
+- ✅ Focused 6-step risk-control pipeline — crisis detection, narrow regex refusal, output guard, citation validation
+- ✅ Complexity-adaptive answers — one unified synthesis prompt; simple questions get short answers, complex ones get fuller treatment
+- ✅ Narrow refusal set — 6 categories only; the routing model judges out-of-scope, regex catches the clear-cut cases
+- ✅ Crisis layer — SELF_HARM and FAMILY_VIOLENCE keywords override everything with crisis cards (1737, Lifeline, Women's Refuge, Are You OK)
+- ✅ Banned-phrase output guard — EN + ZH patterns, regenerate once then safe fallback
+- ✅ URL allowlist citation validation — only legislation.govt.nz, employment.govt.nz, ird.govt.nz, communitylaw.org.nz, etc. survive
+- ✅ `refused` badge — rendered only on refused answers, not on every message
+- ✅ Blocking first-message disclaimer modal — single mandatory checkbox, logged to `consent_events` (7-year retention)
+- ✅ Full audit trail — every answer written to `answer_audit` (2-year rolling)
+- ✅ Evaluation system — Langfuse observability + frozen 36-question test set + LLM-as-judge scoring + hard acceptance gate
+- ✅ Compliance-aware Disclaimer / Privacy / Terms drafted against LCA 2006, IALA 2007, FMCA, Privacy Act 2020 (13 IPPs)
+- ✅ Interactive Recharts charts (line / bar / grouped_bar / pie) for data answers
+- ✅ Privacy-first — IP hashed with monthly rotating salt; raw IP never stored
+
+---
+
+## Risk-Control Architecture
+
+Every question passes through a focused 6-step pipeline before a response is returned. Answer shape follows question complexity — one unified synthesis prompt, no forced templates — and a narrow refusal set handles the cases that cross into licensed-adviser territory or a personal-safety crisis.
 
 ```
 User question
@@ -75,38 +95,7 @@ Citation validation + audit log
 Response returned to frontend
 ```
 
-### What Sprint 6 removed
-
-| Sprint 4 (v4) | Sprint 6 |
-|---|---|
-| Haiku intent + domain classifier | **Removed** — the routing model decides scope directly |
-| 15-cell routing matrix (5 tiers × 3 intents) | **Removed** — no domain tiers, no intent classes |
-| 4 template-aware synthesis prompts | **One** unified synthesis prompt |
-| Forced 7-section legal-memo headings | **Removed** — answer shape follows the question |
-| 4-level risk badge (`general_info` / `high_care` / `please_get_advice` / `refused`) | **One** state — the badge renders only when an answer is `refused` |
-| Tiered footers (LIGHT / MEDIUM / FULL) | **One** light footer for every non-refused answer |
-| Output-guard regen max 2 + heading check | Regen max 1, heading check dropped |
-
-The narrow refusal set is **6 categories**: `self_harm` and `family_violence` (caught by `crisis_detector`), plus `active_proceeding`, `immigration`, `criminal`, and `wills_estates` (caught by `refusal_router`).
-
----
-
-## Features
-
-- ✅ Multi-domain knowledge federation: employment law + tax law + labour market data, behind one agent endpoint
-- ✅ Claude tool-use routing — automatic, supports cross-domain queries in one turn
-- ✅ Focused 6-step risk-control pipeline — crisis detection, narrow regex refusal, output guard, citation validation
-- ✅ Complexity-adaptive answers — one unified synthesis prompt; simple questions get short answers, complex ones get fuller treatment
-- ✅ Narrow refusal set — 6 categories only; the routing model judges out-of-scope, regex catches the clear-cut cases
-- ✅ Crisis layer — SELF_HARM and FAMILY_VIOLENCE keywords override everything with crisis cards (1737, Lifeline, Women's Refuge, Are You OK)
-- ✅ Banned-phrase output guard — EN + ZH patterns, regenerate once then safe fallback
-- ✅ URL allowlist citation validation — only legislation.govt.nz, employment.govt.nz, ird.govt.nz, communitylaw.org.nz, etc. survive
-- ✅ `refused` badge — rendered only on refused answers, not on every message
-- ✅ Blocking first-message disclaimer modal — single mandatory checkbox, logged to `consent_events` (7-year retention)
-- ✅ Full audit trail — every answer written to `answer_audit` (2-year rolling)
-- ✅ Compliance-aware Disclaimer / Privacy / Terms drafted against LCA 2006, IALA 2007, FMCA, Privacy Act 2020 (13 IPPs)
-- ✅ Interactive Recharts charts (line / bar / grouped_bar / pie) for data answers
-- ✅ Privacy-first — IP hashed with monthly rotating salt; raw IP never stored
+The narrow refusal set is **6 categories**: `self_harm` and `family_violence` (caught by `crisis_detector`), plus `active_proceeding`, `immigration`, `criminal`, and `wills_estates` (caught by `refusal_router`). A refused answer returns a warm referral and carries a `refused` badge; non-refused answers carry no badge.
 
 ---
 
@@ -134,11 +123,13 @@ The narrow refusal set is **6 categories**: `self_harm` and `family_violence` (c
 
 - **Tool-Use Agent Routing** — Claude Sonnet 4.5 function calling across 3 tools (`search_employment_law`, `search_tax_law`, `query_labour_market_stats`). Cross-domain queries are handled naturally because the model can call multiple tools in one turn. Adding a new domain is one tool registration.
 
-- **Focused Risk Control (Sprint 6)** — crisis detector → narrow regex refusal → output guard → citation allowlist. Sprint 4's intent classifier and 15-cell routing matrix were removed: they added structure without adding safety, and forced simple questions into legal-memo templates. The routing model now judges scope directly, and answer shape follows question complexity.
+- **Focused Risk Control** — crisis detector → narrow regex refusal → output guard → citation allowlist. The routing model judges scope directly; there is no separate intent classifier and no routing matrix. Answer shape follows question complexity, so simple questions are not forced into legal-memo templates.
 
 - **Cite-or-Refuse** — every legal/tax claim must be backed by a source URL on the allowlist. URLs not on the list are stripped from `sources` before the response leaves the API. No citation → safe fallback.
 
-- **Complexity-Adaptive Synthesis** — one unified Haiku system prompt with a word-count cap and a substance requirement, replacing four template-aware prompts. A simple lookup gets a short direct answer; a complex question gets a fuller treatment — without forced section headings.
+- **Complexity-Adaptive Synthesis** — one unified Haiku system prompt with a word-count cap and a substance requirement. A simple lookup gets a short direct answer; a complex question gets a fuller treatment — without forced section headings.
+
+- **Observability & Evaluation** — full Langfuse tracing instruments every request as nested spans (`route`, `retrieve`, `generate`). Answer quality is governed by a dedicated eval system: a frozen 36-question test set, an LLM-as-judge that scores each answer against a frozen rubric, and a hard acceptance gate run on every iteration. Eval traffic is tagged `env=eval` so it never pollutes production observability dashboards. See the [Evaluation System](#evaluation-system) section below.
 
 - **Auditable Consent Architecture** — first-message blocking modal with a mandatory checkbox; accept/decline written to `consent_events` table with hashed IP (monthly rotating salt) and 7-year retention for legal defence.
 
@@ -264,25 +255,39 @@ The system writes structured audit data to `data/audit.db` (SQLite, WAL mode):
 | `source_registry` | Source freshness tracking | indefinite |
 | `banned_phrases` | Mirror of output_guard regex list | versioned |
 
-> Sprint 6 slimmed `answer_audit` — the `intent_class`, `intent_confidence`, `domain_tier`, and `routing_outcome` columns were dropped along with the intent classifier; `refusal_reason` was added.
-
 `docs/monitoring_queries.sql` ships 15 named queries covering daily health, weekly review, monthly trends, incident investigation, and quarterly retention enforcement. Governance procedures (version bumps, review calendar, incident runbooks, retention SQL) are documented in `docs/GOVERNANCE.md`.
 
 ---
 
-## Testing & Evaluation
+## Evaluation System
 
-| Component | Tests | Result |
-|---|---|---|
-| `crisis_detector.py` | 10 | ✅ 10/10 PASS |
-| `output_guard.py` | 6 | ✅ 6/6 PASS |
-| `api/db.py` | 8 | ✅ 8/8 PASS |
-| Frontend TypeScript (`tsc --noEmit`) | full project | ✅ 0 errors |
-| RAG retrieval | 20-question 3-tier suite | ✅ 100% coverage |
-| Text-to-SQL | 175 automated tests, 3 layers | ✅ 175/175 PASS |
-| Stats NZ data quality | 50 cross-metric + semantic checks | ✅ 50/50 PASS |
+Answer quality is governed by a dedicated evaluation system, not by spot-checking. It has two halves: **observability** — knowing what the system did on every request — and a **scored eval loop** — measuring whether answers are good and gating changes on that measurement.
 
-`test_local_api.sh` ships an 8-scenario API smoke test (health → consent → normal Q → crisis detection → forced refusal → pre-flight refusal → legacy compatibility → audit DB row counts).
+### Observability — Langfuse tracing
+
+Every request to `/api/agent/query` is instrumented with Langfuse. The `@observe` decorator captures the pipeline as a tree of nested spans — `route` (tool selection), `retrieve` (parallel retrieval), `generate` (synthesis) — so any answer can be traced end to end: which tools were called, what was retrieved, how many times the output guard regenerated, and the final latency. Tracing fails open — if Langfuse is unconfigured or unreachable, a no-op decorator is substituted and production answers are never affected.
+
+Eval traffic is isolated from production. The eval runner sends `X-Eval-*` request headers; the server attaches an `env=eval` tag plus per-question metadata (`eval_run_id`, `question_id`, `pipeline`, `difficulty`) to the trace. A saved "Production only (NOT eval)" filter view keeps eval runs from inflating production dashboards.
+
+### Evaluation loop — a four-stage pipeline
+
+```
+test_set (frozen)  ──run_eval.py──▶  raw run  ──llm_judge.py──▶  scored run  ──compare──▶  gate verdict
+   36 questions        (real HTTP)   answers +    (LLM-as-judge)   1–5 scores +   (vs baseline)  pass / fail
+                                     routing                      verdict
+```
+
+**Stage 1 — frozen test set.** Thirty-six questions, deliberately constructed as a matrix: all six pipelines (`employment`, `tax`, `labour_market`, `cross`, `out_of_scope`, `crisis`), every routing outcome, and every difficulty level (`easy` → `adversarial`). Each question carries `expected_points` describing what a good answer should cover. The test set is **frozen before it is run** — editing it after seeing outputs would quietly delete the questions the system handles worst, which is exactly the signal the eval exists to catch. A genuinely broken question triggers a version bump to a new test set, never an in-place edit.
+
+**Stage 2 — the run.** `run_eval.py` POSTs every question to the live endpoint over real HTTP — the same network path a real user takes. It records the answer, sources, the *observed* routing, the regeneration count, latency, and the Langfuse trace id.
+
+**Stage 3 — LLM-as-judge.** `llm_judge.py` scores each answer with an LLM judge (Opus by default). Scoring is delegated to a model because the rubric's legal-reasoning and risk-discipline dimensions require legal expertise to apply consistently. The judge receives a frozen rubric, the question, `expected_points`, the answer, and slim audit metadata, and returns four dimension scores (1–5), a `pass`/`partial`/`fail` verdict, and a single dominant `failure_mode` from a fixed enum. Two rubrics are routed by pipeline — a legal-domain rubric and a labour-market rubric. The large rubric block is sent with prompt caching, cutting input cost ~80%.
+
+**Stage 4 — compare and gate.** A comparison script diffs a new scored run against a baseline and emits a **hard acceptance gate**: fixed thresholds on the key dimension averages plus zero tolerance for specific failure modes. The gate exits non-zero on any breach, so a quality regression blocks the change. Gate thresholds ratchet upward each iteration — the last passing run becomes the new floor.
+
+### Methodology
+
+Four principles make the mechanism trustworthy: **freeze before running** (test set and rubrics are locked before any run); **one change at a time** (each fix is measured individually, so a gate pass attributes to a specific change); **read a real bad answer before trusting a metric** (a score says *something* is wrong, not *what* — reading the worst answers once caught a missing dependency that a score alone would have misdiagnosed as a prompt regression); and **LLM-as-judge over manual scoring** for consistency on the expertise-heavy dimensions. The full methodology is documented in [`docs/Eval_Methodology.md`](docs/Eval_Methodology.md).
 
 ---
 
