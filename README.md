@@ -1,6 +1,6 @@
 # NZ Law Compass
 
-An AI-powered Q&A system for New Zealand employment law, tax law, and labour market data — multi-domain RAG and Text-to-SQL pipelines, governed by a 9-stage risk-control layer with crisis detection, intent classification, output guards, and full audit logging. Live at **[nzlaw.linkiwise.com](https://nzlaw.linkiwise.com)**.
+An AI-powered Q&A system for New Zealand employment law, tax law, and labour market data — multi-domain RAG and Text-to-SQL pipelines, governed by a focused risk-control pipeline with crisis detection, a narrow refusal set, an output guard, and full audit logging. Live at **[nzlaw.linkiwise.com](https://nzlaw.linkiwise.com)**.
 
 > ⚖️ For informational purposes only — not legal or tax advice. For serious matters, consult a qualified professional.
 
@@ -18,7 +18,7 @@ Ask a question in plain English. A Claude tool-use agent automatically routes it
 | **Cross-domain** | *"How are redundancy payments taxed?"* | Tool-use agent calls both `search_employment_law` and `search_tax_law` in one turn |
 | **High-stakes / out-of-scope** | *"Should I sue my employer?"* / *"Help me apply for a visa"* | Refused with structured referrals (Community Law, IRD, licensed adviser) |
 
-Every answer carries a per-message **risk badge** (`general_info` / `high_care` / `please_get_advice` / `refused`) derived from the routing matrix. Every legal and tax answer includes source citations from an allowlisted set of NZ government domains. Every interaction is audit-logged.
+Answer shape follows question complexity — a simple lookup gets a short direct answer; a complex question gets a fuller treatment. When a question crosses into licensed-adviser territory or a personal-safety crisis, the answer is **refused** with a warm referral and a `refused` badge. Every legal and tax answer includes source citations from an allowlisted set of NZ government domains. Every interaction is audit-logged.
 
 ---
 
@@ -35,64 +35,59 @@ Try asking:
 
 ---
 
-## v4 Risk-Control Architecture
+## Risk-Control Architecture (Sprint 6)
 
-Every question now passes through a 9-stage pipeline before a response is returned:
+Sprint 4 shipped a 9-stage pipeline: a Haiku intent classifier, a 15-cell routing matrix, four synthesis templates, and forced 7-section legal-memo headings. In practice that machinery turned simple questions into walls of text — the structure was load-bearing in the wrong direction. **Sprint 6 tore it down and rebuilt it as a focused 6-step pipeline:** one unified synthesis prompt that lets answer shape follow question complexity, a narrow refusal set, and a single light footer.
 
 ```
 User question
     │
     ▼
-Stage 1: Pre-flight regex refusal      (refusal_router.py)
-    │   Out-of-scope / active disputes / form-filling
-    │   Fast pattern match, no API call
-    ▼
-Stage 2: Crisis detector                (crisis_detector.py)
-    │   5 lexicons in priority order:
+Step 1: Crisis detector                 (crisis_detector.py)
+    │   Lexicon scan, no API call:
     │   SELF_HARM / FAMILY_VIOLENCE  → override with crisis card (1737, Lifeline, Women's Refuge)
-    │   IMMIGRATION / CRIMINAL       → force REFUSE_WITH_REFERRAL
-    │   IMMINENT_ACTION              → pin intent to HIGH_STAKES, continue
+    │   IMMIGRATION / CRIMINAL       → force refuse with referral
     ▼
-Stage 3: Intent + domain classifier     (intent_classifier.py)
-    │   Claude Haiku, structured JSON
-    │   intent_class:  LOOKUP / ADVICE / HIGH_STAKES
-    │   domain_tier:   H1 / H2 / H3 / M / L
-    │   Confidence < 0.75 → conservative one-notch upgrade
+Step 2: Pre-flight regex refusal        (refusal_router.py)
+    │   4 clear-cut categories: active proceeding · immigration ·
+    │   criminal defence · wills & estates
+    │   Everything else is left for the routing model to judge
     ▼
-Stage 4: Routing matrix                 (15 combinations → 4 outcomes)
-    │   DIRECT_ANSWER · STRUCTURED_INFORMATIONAL
-    │   STRUCTURED_ADVICE_SKELETON · REFUSE_WITH_REFERRAL
-    ▼
-Stage 5: Tool routing                   (Claude Sonnet, function calling)
+Step 3: Tool routing                    (Claude Sonnet, function calling)
     │   search_employment_law · search_tax_law · query_labour_market_stats
     │   System prompt enforces "must call a tool, never answer from prior knowledge"
+    │   Out-of-scope domains refused here by the model itself
     ▼
-Stage 6: Parallel retrieval             (selected tools execute concurrently)
+Step 4: Parallel retrieval              (selected tools execute concurrently)
     ▼
-Stage 7: Template-aware synthesis       (Claude Haiku, 4 system prompts)
-    │   Each template includes banned-phrase list + verbatim risk footer instruction
+Step 5: Unified synthesis               (Claude Haiku, ONE system prompt)
+    │   Answer shape follows question complexity — no forced headings.
+    │   Word-count cap + substance requirement; banned-phrase list inline.
     ▼
-Stage 8: Output guard                   (output_guard.py)
-    │   Checks banned phrases (10 EN + 10 ZH), required headings, footer verbatim
-    │   Violation → regenerate (max 2 attempts) → fall back to safe refusal template
+Step 6: Output guard                    (output_guard.py)
+    │   Banned-phrase scan (EN + ZH) + verbatim LIGHT footer check
+    │   Violation → regenerate (max 1) → fall back to safe referral block
     ▼
-Stage 9: Citation validation + audit log
-    │   citation_validator.py: strips any URL not on allowlist
-    │   api/db.py: writes one row to answer_audit (intent, tier, regeneration count, badge)
-    │
+Citation validation + audit log
+    │   citation_validator.py: strips any URL not on the allowlist
+    │   api/db.py: writes one slim row to answer_audit
     ▼
-Response returned to frontend (with risk badge)
+Response returned to frontend
 ```
 
-### Routing matrix
+### What Sprint 6 removed
 
-| Domain tier | LOOKUP | ADVICE | HIGH_STAKES |
-|---|---|---|---|
-| H1 (criminal, immigration) | REFUSE_WITH_REFERRAL | REFUSE_WITH_REFERRAL | REFUSE_WITH_REFERRAL |
-| H2 (family, personal injury) | STRUCTURED_INFORMATIONAL | STRUCTURED_ADVICE_SKELETON | REFUSE_WITH_REFERRAL |
-| H3 (wills, consumer) | STRUCTURED_INFORMATIONAL | STRUCTURED_ADVICE_SKELETON | STRUCTURED_ADVICE_SKELETON |
-| **M (employment, tax)** | DIRECT_ANSWER | STRUCTURED_INFORMATIONAL | STRUCTURED_ADVICE_SKELETON |
-| L (general info) | DIRECT_ANSWER | DIRECT_ANSWER | STRUCTURED_INFORMATIONAL |
+| Sprint 4 (v4) | Sprint 6 |
+|---|---|
+| Haiku intent + domain classifier | **Removed** — the routing model decides scope directly |
+| 15-cell routing matrix (5 tiers × 3 intents) | **Removed** — no domain tiers, no intent classes |
+| 4 template-aware synthesis prompts | **One** unified synthesis prompt |
+| Forced 7-section legal-memo headings | **Removed** — answer shape follows the question |
+| 4-level risk badge (`general_info` / `high_care` / `please_get_advice` / `refused`) | **One** state — the badge renders only when an answer is `refused` |
+| Tiered footers (LIGHT / MEDIUM / FULL) | **One** light footer for every non-refused answer |
+| Output-guard regen max 2 + heading check | Regen max 1, heading check dropped |
+
+The narrow refusal set is **6 categories**: `self_harm` and `family_violence` (caught by `crisis_detector`), plus `active_proceeding`, `immigration`, `criminal`, and `wills_estates` (caught by `refusal_router`).
 
 ---
 
@@ -100,12 +95,14 @@ Response returned to frontend (with risk badge)
 
 - ✅ Multi-domain knowledge federation: employment law + tax law + labour market data, behind one agent endpoint
 - ✅ Claude tool-use routing — automatic, supports cross-domain queries in one turn
-- ✅ 9-stage risk control pipeline — pre-flight refusal, crisis detection, intent + domain classification, output guard, citation validation
-- ✅ Per-message risk badge (`general_info` / `high_care` / `please_get_advice` / `refused`)
+- ✅ Focused 6-step risk-control pipeline — crisis detection, narrow regex refusal, output guard, citation validation
+- ✅ Complexity-adaptive answers — one unified synthesis prompt; simple questions get short answers, complex ones get fuller treatment
+- ✅ Narrow refusal set — 6 categories only; the routing model judges out-of-scope, regex catches the clear-cut cases
 - ✅ Crisis layer — SELF_HARM and FAMILY_VIOLENCE keywords override everything with crisis cards (1737, Lifeline, Women's Refuge, Are You OK)
-- ✅ Banned-phrase output guard — 10 EN + 10 ZH patterns, regenerate up to 2× then safe fallback
+- ✅ Banned-phrase output guard — EN + ZH patterns, regenerate once then safe fallback
 - ✅ URL allowlist citation validation — only legislation.govt.nz, employment.govt.nz, ird.govt.nz, communitylaw.org.nz, etc. survive
-- ✅ Blocking first-message disclaimer modal — 3 mandatory checkboxes, logged to `consent_events` (7-year retention)
+- ✅ `refused` badge — rendered only on refused answers, not on every message
+- ✅ Blocking first-message disclaimer modal — single mandatory checkbox, logged to `consent_events` (7-year retention)
 - ✅ Full audit trail — every answer written to `answer_audit` (2-year rolling)
 - ✅ Compliance-aware Disclaimer / Privacy / Terms drafted against LCA 2006, IALA 2007, FMCA, Privacy Act 2020 (13 IPPs)
 - ✅ Interactive Recharts charts (line / bar / grouped_bar / pie) for data answers
@@ -119,9 +116,8 @@ Response returned to frontend (with risk badge)
 |-------|-----------|
 | Language | Python 3.11 / TypeScript |
 | Tool-use routing | Claude Sonnet 4.5 (function calling, 3 tools) |
-| Intent + domain classifier | Claude Haiku 4.5 (structured JSON) |
 | SQL generation | Claude Sonnet (focused schema + few-shot) |
-| Answer synthesis | Claude Haiku (template-aware, 4 system prompts) |
+| Answer synthesis | Claude Haiku (one unified system prompt) |
 | Embeddings | sentence-transformers/all-MiniLM-L6-v2 (33M params, local) |
 | Vector database | ChromaDB (HNSW, cosine) — separate collections for employment + tax |
 | Analytical database | DuckDB (columnar OLAP) — Stats NZ labour data |
@@ -136,15 +132,15 @@ Response returned to frontend (with risk badge)
 
 ## AI Practices Implemented
 
-- **Tool-Use Agent Routing** — Claude Sonnet 4.5 function calling across 3 tools (`search_employment_law`, `search_tax_law`, `query_labour_market_stats`). Replaces the previous static intent classifier; cross-domain queries are handled naturally because the model can call multiple tools in one turn. Adding a new domain is one tool registration.
+- **Tool-Use Agent Routing** — Claude Sonnet 4.5 function calling across 3 tools (`search_employment_law`, `search_tax_law`, `query_labour_market_stats`). Cross-domain queries are handled naturally because the model can call multiple tools in one turn. Adding a new domain is one tool registration.
 
-- **Defence-in-depth Safety Stack** — five independent layers: pre-flight regex refusal → crisis detector → intent + domain classifier → banned-phrase output guard → citation allowlist. No single layer is load-bearing; failure of any one does not compromise the others.
-
-- **Two-Axis Routing (domain × intent)** — every query mapped to a `(domain_tier, intent_class)` cell in a 15-cell matrix that determines one of four response templates. Conservative-upgrade rule on low-confidence classifications.
+- **Focused Risk Control (Sprint 6)** — crisis detector → narrow regex refusal → output guard → citation allowlist. Sprint 4's intent classifier and 15-cell routing matrix were removed: they added structure without adding safety, and forced simple questions into legal-memo templates. The routing model now judges scope directly, and answer shape follows question complexity.
 
 - **Cite-or-Refuse** — every legal/tax claim must be backed by a source URL on the allowlist. URLs not on the list are stripped from `sources` before the response leaves the API. No citation → safe fallback.
 
-- **Auditable Consent Architecture** — first-message blocking modal with 3 mandatory checkboxes; accept/decline written to `consent_events` table with hashed IP (monthly rotating salt) and 7-year retention for legal defence.
+- **Complexity-Adaptive Synthesis** — one unified Haiku system prompt with a word-count cap and a substance requirement, replacing four template-aware prompts. A simple lookup gets a short direct answer; a complex question gets a fuller treatment — without forced section headings.
+
+- **Auditable Consent Architecture** — first-message blocking modal with a mandatory checkbox; accept/decline written to `consent_events` table with hashed IP (monthly rotating salt) and 7-year retention for legal defence.
 
 - **Multi-Source Retrieval Architecture** — RAG over employment documents, RAG over tax documents, and Text-to-SQL over Stats NZ DuckDB, all federated behind a single agent endpoint.
 
@@ -194,9 +190,9 @@ Automated collection from authoritative NZ government sources.
 
 ---
 
-## Tax RAG Pipeline (Sprint 4 — Live)
+## Tax RAG Pipeline (Live)
 
-The tax domain is fully wired into the same v4 agent pipeline as employment law and deployed to production:
+The tax domain is fully wired into the same agent pipeline as employment law and deployed to production:
 
 - ✅ `pipeline/tools/tax_search.py` — ChromaDB tool wrapper for collection `nz_tax_law` at `data/vectorstore_tax`
 - ✅ `pipeline/refusal_router.py` — pre-flight refusal categories: trusts / international tax / FBT / bright-line / crypto tax / active IRD disputes / form-filling assistance
@@ -259,14 +255,16 @@ QueryResult → DataFrame → rule-based chart inference
 
 ## Audit & Governance
 
-The v4 system writes structured audit data to `data/audit.db` (SQLite, WAL mode):
+The system writes structured audit data to `data/audit.db` (SQLite, WAL mode):
 
 | Table | Purpose | Retention |
 |---|---|---|
 | `consent_events` | Disclaimer accept/decline events with hashed IP | 7 years |
-| `answer_audit` | Per-answer metadata (intent, tier, regeneration count, badge, refused) | 2 years rolling |
+| `answer_audit` | Per-answer metadata (domain, model, citations, regeneration count, refused, refusal reason, crisis route) | 2 years rolling |
 | `source_registry` | Source freshness tracking | indefinite |
 | `banned_phrases` | Mirror of output_guard regex list | versioned |
+
+> Sprint 6 slimmed `answer_audit` — the `intent_class`, `intent_confidence`, `domain_tier`, and `routing_outcome` columns were dropped along with the intent classifier; `refusal_reason` was added.
 
 `docs/monitoring_queries.sql` ships 15 named queries covering daily health, weekly review, monthly trends, incident investigation, and quarterly retention enforcement. Governance procedures (version bumps, review calendar, incident runbooks, retention SQL) are documented in `docs/GOVERNANCE.md`.
 
@@ -304,8 +302,11 @@ The v4 system writes structured audit data to `data/audit.db` (SQLite, WAL mode)
 | Variable | Description |
 |----------|-------------|
 | `ANTHROPIC_API_KEY` | Anthropic API key (required) |
+| `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` / `LANGFUSE_HOST` | Langfuse observability (optional — tracing runs in no-op mode if absent) |
 
 Railway must mount a persistent volume to `data/` so `audit.db` survives restarts.
+
+> The Anthropic API key is read only from the `ANTHROPIC_API_KEY` environment variable. It is never passed as a function argument, so it is not captured in Langfuse trace spans.
 
 ---
 
