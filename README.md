@@ -1,6 +1,6 @@
 # NZ Law Compass
 
-An AI-powered Q&A system for New Zealand employment law, tax law, and labour market data — multi-domain RAG and Text-to-SQL pipelines, governed by a focused risk-control pipeline with crisis detection, a narrow refusal set, an output guard, and full audit logging. Answer quality is governed by a dedicated evaluation system: Langfuse tracing and span-level observability, a frozen test set scored by an LLM-as-judge, and a hard acceptance gate. Live at **[nzlaw.linkiwise.com](https://nzlaw.linkiwise.com)**.
+An AI-powered Q&A system for New Zealand employment law, tenancy law, tax law, and labour market data — multi-domain RAG and Text-to-SQL pipelines, governed by a focused risk-control pipeline with crisis detection, a narrow refusal set, an output guard, and full audit logging. Answer quality is governed by a dedicated evaluation system: Langfuse tracing and span-level observability, a frozen test set scored by an LLM-as-judge, and a hard acceptance gate. Live at **[nzlaw.linkiwise.com](https://nzlaw.linkiwise.com)**.
 
 > ⚖️ For informational purposes only — not legal or tax advice. For serious matters, consult a qualified professional.
 
@@ -13,9 +13,10 @@ Ask a question in plain English. A Claude tool-use agent automatically routes it
 | Query type | Example | How it's answered |
 |---|---|---|
 | **Employment law** | *"What is the minimum notice period for dismissal?"* | RAG over NZ employment law documents |
+| **Tenancy law** | *"Can my landlord increase the rent whenever they want?"* | RAG over Residential Tenancies Act + Tenancy Services guides |
 | **Tax law** | *"What is the GST registration threshold?"* | RAG over IRD + Income Tax Act 2007 + GST Act 1985 |
 | **Labour market data** | *"Which industry had the fastest wage growth over 5 years?"* | Text-to-SQL over Stats NZ labour market data |
-| **Cross-domain** | *"How are redundancy payments taxed?"* | Tool-use agent calls both `search_employment_law` and `search_tax_law` in one turn |
+| **Cross-domain** | *"How are redundancy payments taxed?"* | Tool-use agent calls multiple tools in one turn |
 | **High-stakes / out-of-scope** | *"Should I sue my employer?"* / *"Help me apply for a visa"* | Refused with structured referrals (Community Law, IRD, licensed adviser) |
 
 Answer shape follows question complexity — a simple lookup gets a short direct answer; a complex question gets a fuller treatment. When a question crosses into licensed-adviser territory or a personal-safety crisis, the answer is **refused** with a warm referral and a `refused` badge. Every legal and tax answer includes source citations from an allowlisted set of NZ government domains. Every interaction is audit-logged.
@@ -29,26 +30,28 @@ Answer shape follows question complexity — a simple lookup gets a short direct
 Try asking:
 - *What is the current minimum wage in New Zealand?*
 - *How many sick days am I entitled to?*
+- *Can my landlord increase the rent whenever they want?*
+- *What are the Healthy Homes standards for rentals?*
+- *How do GST rules apply to small businesses?*
 - *What is the gender pay gap in the healthcare sector?*
-- *I've been made redundant after 5 years — what am I owed?*
 - *What industries have seen the most employment growth since 2020?*
 
 ---
 
 ## Features
 
-- ✅ Multi-domain knowledge federation: employment law + tax law + labour market data, behind one agent endpoint
-- ✅ Claude tool-use routing — automatic, supports cross-domain queries in one turn
+- ✅ Multi-domain knowledge federation: employment law + tenancy law + tax law + labour market data, behind one agent endpoint
+- ✅ Claude tool-use routing — automatic, supports cross-domain queries in one turn (4 tools)
 - ✅ Focused 6-step risk-control pipeline — crisis detection, narrow regex refusal, output guard, citation validation
 - ✅ Complexity-adaptive answers — one unified synthesis prompt; simple questions get short answers, complex ones get fuller treatment
 - ✅ Narrow refusal set — 6 categories only; the routing model judges out-of-scope, regex catches the clear-cut cases
 - ✅ Crisis layer — SELF_HARM and FAMILY_VIOLENCE keywords override everything with crisis cards (1737, Lifeline, Women's Refuge, Are You OK)
 - ✅ Banned-phrase output guard — EN + ZH patterns, regenerate once then safe fallback
-- ✅ URL allowlist citation validation — only legislation.govt.nz, employment.govt.nz, ird.govt.nz, communitylaw.org.nz, etc. survive
+- ✅ URL allowlist citation validation — only legislation.govt.nz, employment.govt.nz, tenancy.govt.nz, ird.govt.nz, communitylaw.org.nz, etc. survive
 - ✅ `refused` badge — rendered only on refused answers, not on every message
 - ✅ Blocking first-message disclaimer modal — single mandatory checkbox, logged to `consent_events` (7-year retention)
 - ✅ Full audit trail — every answer written to `answer_audit` (2-year rolling)
-- ✅ Evaluation system — Langfuse observability + frozen 36-question test set + LLM-as-judge scoring + hard acceptance gate
+- ✅ Evaluation system — Langfuse observability + frozen 49-question test set + LLM-as-judge scoring + hard acceptance gate
 - ✅ Compliance-aware Disclaimer / Privacy / Terms drafted against LCA 2006, IALA 2007, FMCA, Privacy Act 2020 (13 IPPs)
 - ✅ Interactive Recharts charts (line / bar / grouped_bar / pie) for data answers
 - ✅ Privacy-first — IP hashed with monthly rotating salt; raw IP never stored
@@ -74,7 +77,7 @@ Step 2: Pre-flight regex refusal        (refusal_router.py)
     │   Everything else is left for the routing model to judge
     ▼
 Step 3: Tool routing                    (Claude Sonnet, function calling)
-    │   search_employment_law · search_tax_law · query_labour_market_stats
+    │   search_employment_law · search_tenancy_law · search_tax_law · query_labour_market_stats
     │   System prompt enforces "must call a tool, never answer from prior knowledge"
     │   Out-of-scope domains refused here by the model itself
     ▼
@@ -104,11 +107,11 @@ The narrow refusal set is **6 categories**: `self_harm` and `family_violence` (c
 | Layer | Technology |
 |-------|-----------|
 | Language | Python 3.11 / TypeScript |
-| Tool-use routing | Claude Sonnet 4.5 (function calling, 3 tools) |
+| Tool-use routing | Claude Sonnet 4.5 (function calling, 4 tools) |
 | SQL generation | Claude Sonnet (focused schema + few-shot) |
 | Answer synthesis | Claude Haiku (one unified system prompt) |
 | Embeddings | sentence-transformers/all-MiniLM-L6-v2 (33M params, local) |
-| Vector database | ChromaDB (HNSW, cosine) — separate collections for employment + tax |
+| Vector database | ChromaDB (HNSW, cosine) — separate collections for employment, tenancy + tax |
 | Analytical database | DuckDB (columnar OLAP) — Stats NZ labour data |
 | Audit + consent storage | SQLite (WAL, idempotent migrations) |
 | Web crawling | requests, BeautifulSoup4, pdfplumber |
@@ -121,7 +124,7 @@ The narrow refusal set is **6 categories**: `self_harm` and `family_violence` (c
 
 ## AI Practices Implemented
 
-- **Tool-Use Agent Routing** — Claude Sonnet 4.5 function calling across 3 tools (`search_employment_law`, `search_tax_law`, `query_labour_market_stats`). Cross-domain queries are handled naturally because the model can call multiple tools in one turn. Adding a new domain is one tool registration.
+- **Tool-Use Agent Routing** — Claude Sonnet 4.5 function calling across 4 tools (`search_employment_law`, `search_tenancy_law`, `search_tax_law`, `query_labour_market_stats`). Cross-domain queries are handled naturally because the model can call multiple tools in one turn. Adding a new domain is one tool registration.
 
 - **Focused Risk Control** — crisis detector → narrow regex refusal → output guard → citation allowlist. The routing model judges scope directly; there is no separate intent classifier and no routing matrix. Answer shape follows question complexity, so simple questions are not forced into legal-memo templates.
 
@@ -129,11 +132,11 @@ The narrow refusal set is **6 categories**: `self_harm` and `family_violence` (c
 
 - **Complexity-Adaptive Synthesis** — one unified Haiku system prompt with a word-count cap and a substance requirement. A simple lookup gets a short direct answer; a complex question gets a fuller treatment — without forced section headings.
 
-- **Observability & Evaluation** — full Langfuse tracing instruments every request as nested spans (`route`, `retrieve`, `generate`). Answer quality is governed by a dedicated eval system: a frozen 36-question test set, an LLM-as-judge that scores each answer against a frozen rubric, and a hard acceptance gate run on every iteration. Eval traffic is tagged `env=eval` so it never pollutes production observability dashboards. See the [Evaluation System](#evaluation-system) section below.
+- **Observability & Evaluation** — full Langfuse tracing instruments every request as nested spans (`route`, `retrieve`, `generate`). Answer quality is governed by a dedicated eval system: a frozen 49-question test set (employment + tenancy + tax + labour market + crisis + out-of-scope), an LLM-as-judge that scores each answer against a frozen rubric, and a hard acceptance gate run on every iteration. Eval traffic is tagged `env=eval` so it never pollutes production observability dashboards. See the [Evaluation System](#evaluation-system) section below.
 
 - **Auditable Consent Architecture** — first-message blocking modal with a mandatory checkbox; accept/decline written to `consent_events` table with hashed IP (monthly rotating salt) and 7-year retention for legal defence.
 
-- **Multi-Source Retrieval Architecture** — RAG over employment documents, RAG over tax documents, and Text-to-SQL over Stats NZ DuckDB, all federated behind a single agent endpoint.
+- **Multi-Source Retrieval Architecture** — RAG over employment documents, RAG over tenancy documents, RAG over tax documents, and Text-to-SQL over Stats NZ DuckDB, all federated behind a single agent endpoint.
 
 - **Text-to-SQL with Dynamic Schema Injection** — Haiku selects 1–5 relevant tables from 11 (60–90% fewer tokens than full schema), then Sonnet generates DuckDB SQL with focused schema + 10 few-shot Q→SQL examples.
 
@@ -178,6 +181,25 @@ Automated collection from authoritative NZ government sources.
 | 3 | Edge cases (contractor classification, foreign workers) | 5 | 100% |
 
 **Overall retrieval coverage: 100% (20/20)**
+
+---
+
+## Tenancy RAG Pipeline (Live)
+
+The tenancy domain is the third RAG pipeline, covering NZ residential tenancy law:
+
+- ✅ `pipeline/tools/tenancy_search.py` — ChromaDB tool wrapper for collection `nz_tenancy_law` at `data/vectorstore_tenancy`
+- ✅ `pipeline/citation_validator.py` — allowlist extended for `tenancy.govt.nz`, `hud.govt.nz`
+- ✅ `pipeline/crisis_detector.py` — family violence lexicon narrowed to require personal crisis context (avoids false positives on legitimate tenancy law queries about family violence protections)
+- ✅ Tool registered in `agent_router.py` — Sonnet routes between employment, tenancy, and tax tools
+
+### Tenancy sources
+
+Residential Tenancies Act 1986, Residential Tenancies Amendment Act 2024, Healthy Homes Guarantee Act 2017, Healthy Homes Standards Regulations, Residential Tenancies Regulations 1998, Tenancy Services guides (tenancy.govt.nz), Community Law Manual tenancy chapters, and Citizens Advice Bureau tenancy articles.
+
+### Tenancy scope
+
+**In scope:** Tenancy agreements and bonds, rent increases and market rent, repairs and maintenance, Healthy Homes standards, ending a tenancy, Tenancy Tribunal, pet consent rules, boarding houses, and flatting arrangements.
 
 ---
 
@@ -277,7 +299,7 @@ test_set (frozen)  ──run_eval.py──▶  raw run  ──llm_judge.py──
                                      routing                      verdict
 ```
 
-**Stage 1 — frozen test set.** Thirty-six questions, deliberately constructed as a matrix: all six pipelines (`employment`, `tax`, `labour_market`, `cross`, `out_of_scope`, `crisis`), every routing outcome, and every difficulty level (`easy` → `adversarial`). Each question carries `expected_points` describing what a good answer should cover. The test set is **frozen before it is run** — editing it after seeing outputs would quietly delete the questions the system handles worst, which is exactly the signal the eval exists to catch. A genuinely broken question triggers a version bump to a new test set, never an in-place edit.
+**Stage 1 — frozen test set.** Forty-nine questions, deliberately constructed as a matrix: all seven pipelines (`employment`, `tenancy`, `tax`, `labour_market`, `cross`, `out_of_scope`, `crisis`), every routing outcome, and every difficulty level (`easy` → `adversarial`). Each question carries `expected_points` describing what a good answer should cover. The test set is **frozen before it is run** — editing it after seeing outputs would quietly delete the questions the system handles worst, which is exactly the signal the eval exists to catch. A genuinely broken question triggers a version bump to a new test set, never an in-place edit.
 
 **Stage 2 — the run.** `run_eval.py` POSTs every question to the live endpoint over real HTTP — the same network path a real user takes. It records the answer, sources, the *observed* routing, the regeneration count, latency, and the Langfuse trace id.
 
@@ -308,6 +330,8 @@ Four principles make the mechanism trustworthy: **freeze before running** (test 
 |----------|-------------|
 | `ANTHROPIC_API_KEY` | Anthropic API key (required) |
 | `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` / `LANGFUSE_HOST` | Langfuse observability (optional — tracing runs in no-op mode if absent) |
+| `TAX_VECTORSTORE_URL` / `TAX_VECTORSTORE_VERSION` | Cloudflare R2 URL + version tag for tax vectorstore (downloaded at startup) |
+| `TENANCY_VECTORSTORE_URL` / `TENANCY_VECTORSTORE_VERSION` | Cloudflare R2 URL + version tag for tenancy vectorstore (downloaded at startup) |
 
 Railway must mount a persistent volume to `data/` so `audit.db` survives restarts.
 
@@ -345,4 +369,4 @@ Full Privacy Act 2020 alignment (13 IPPs) documented at `/privacy`.
 
 ---
 
-*For informational purposes only — not legal or tax advice. All information sourced from official New Zealand government websites (legislation.govt.nz, employment.govt.nz, ird.govt.nz, Stats NZ). Compliance posture is conservative-by-default: the system refuses cleanly when a question crosses into licensed-adviser territory (LCA 2006, IALA 2007, FMCA). For serious matters, consult a qualified professional.*
+*For informational purposes only — not legal or tax advice. All information sourced from official New Zealand government websites (legislation.govt.nz, employment.govt.nz, tenancy.govt.nz, ird.govt.nz, Stats NZ). Compliance posture is conservative-by-default: the system refuses cleanly when a question crosses into licensed-adviser territory (LCA 2006, IALA 2007, FMCA). For serious matters, consult a qualified professional.*
