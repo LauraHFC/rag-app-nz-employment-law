@@ -22,7 +22,7 @@ Execution order:
     6. output_guard.output_guard()      → banned-phrase + footer checks
 
 Public API:
-    run(question: str, api_key: str | None = None) -> AgentResponse
+    run(question: str) -> AgentResponse
 
     AgentResponse fields (Sprint 6 — slimmed):
         answer              str
@@ -178,6 +178,35 @@ TOOLS: list[dict] = [
         },
     },
     {
+        "name": "search_tenancy_law",
+        "description": (
+            "Search the NZ tenancy law knowledge base. Use for questions about: "
+            "residential tenancy agreements, landlord and tenant rights and obligations, "
+            "bond deposits and refunds, rent increases, repairs and maintenance, "
+            "Healthy Homes standards (heating, insulation, ventilation, moisture, draught stopping), "
+            "ending or terminating a tenancy (notice periods, fixed-term vs periodic), "
+            "family violence withdrawal from tenancy, the Tenancy Tribunal, "
+            "boarding houses, unenforceable clauses in tenancy agreements, "
+            "and other topics governed by the Residential Tenancies Act 1986 "
+            "and related NZ tenancy legislation. "
+            "OUT OF SCOPE: Māori land tenancies (Te Ture Whenua Māori Act 1993), "
+            "commercial leases, body corporate / unit title disputes."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": (
+                        "Search query rephrased for retrieval — focus on the tenancy law "
+                        "concept, right, or obligation being asked about."
+                    ),
+                }
+            },
+            "required": ["query"],
+        },
+    },
+    {
         "name": "query_labour_market_stats",
         "description": (
             "Query NZ labour market statistics from Stats NZ and MBIE databases. "
@@ -207,21 +236,27 @@ TOOLS: list[dict] = [
 # ---------------------------------------------------------------------------
 
 ROUTING_SYSTEM_PROMPT = """\
-You are a routing agent for an NZ employment law and tax law information service.
-You have three tools available. Your ONLY job is to decide which tool(s) to call.
+You are a routing agent for an NZ legal information service covering employment law, \
+tax law, and tenancy law.
+You have four tools available. Your ONLY job is to decide which tool(s) to call.
 
 ABSOLUTE RULES — follow these without exception:
 1. You MUST call at least one tool. You are not permitted to answer from prior knowledge.
 2. If the question can be answered with a single tool, call only that tool.
-3. If the question genuinely spans two domains (e.g. the tax treatment of a redundancy payment,
-   or employer obligations that involve both employment law and PAYE), call both relevant tools.
-4. If the question is entirely outside NZ employment law, NZ tax law, and NZ labour market
-   statistics, do NOT call any tool. Instead, your ENTIRE response must be exactly this one
-   JSON line and NOTHING else — no sentence before it, no explanation after it:
+3. If the question genuinely spans two domains, call both relevant tools. Examples:
+   - Tax treatment of a redundancy payment → search_employment_law + search_tax_law
+   - Employer-provided accommodation and eviction → search_employment_law + search_tenancy_law
+   - Tenant's tax obligations on subletting income → search_tenancy_law + search_tax_law
+4. If the question is entirely outside NZ employment law, NZ tax law, NZ tenancy law, and \
+NZ labour market statistics, do NOT call any tool. Instead, your ENTIRE response must be \
+exactly this one JSON line and NOTHING else — no sentence before it, no explanation after it:
      {"refused": true, "reason": "out of scope"}
    Any prose around the JSON will break routing.
-5. Never use the words "legal advice", "tax advice", "your case", or predict outcomes.
-6. Do not ask the user for clarification — make the best routing decision you can.
+5. TENANCY SCOPE: residential tenancies, bonds, rent, repairs, Healthy Homes, Tenancy Tribunal, \
+boarding houses, family violence withdrawal, unenforceable clauses. \
+OUT OF SCOPE for tenancy: Māori land tenancies, commercial leases, body corporate / unit title disputes.
+6. Never use the words "legal advice", "tax advice", "your case", or predict outcomes.
+7. Do not ask the user for clarification — make the best routing decision you can.
 """
 
 # ---------------------------------------------------------------------------
@@ -253,7 +288,7 @@ _LIGHT_FOOTER_INSTR = (
     "End your answer with this single line VERBATIM, on its own line, "
     "preceded by a blank line and a horizontal rule:\n\n"
     "---\n"
-    "AI-generated · verify with the source cited above before acting on it."
+    "AI-generated · verify with the source cited before acting on it."
 )
 
 UNIFIED_SYNTHESIS_PROMPT = f"""\
@@ -426,6 +461,9 @@ def _dispatch_tool(tool_name: str, tool_input: dict) -> Any:
         return execute(tool_input)
     elif tool_name == "search_tax_law":
         from pipeline.tools.tax_search import execute
+        return execute(tool_input)
+    elif tool_name == "search_tenancy_law":
+        from pipeline.tools.tenancy_search import execute
         return execute(tool_input)
     elif tool_name == "query_labour_market_stats":
         from pipeline.tools.labour_stats import execute
@@ -668,18 +706,22 @@ def _synthesise(
 # ---------------------------------------------------------------------------
 
 @observe(name="agent_query")
-def run(question: str, api_key: str | None = None) -> AgentResponse:
+def run(question: str) -> AgentResponse:
     """
     Run the full Sprint 6 agent pipeline for a user question.
 
     Args:
         question: The user's question.
-        api_key:  Anthropic API key (falls back to ANTHROPIC_API_KEY env var).
 
     Returns:
         AgentResponse with slim risk-control metadata.
+
+    Note: the Anthropic API key is read from the ANTHROPIC_API_KEY env var
+    inside this function. It is deliberately NOT a function parameter — the
+    @observe decorator serialises every argument into the Langfuse span
+    input, so passing the key as an arg would leak it into traces.
     """
-    key = api_key or os.environ.get("ANTHROPIC_API_KEY")
+    key = os.environ.get("ANTHROPIC_API_KEY")
     if not key:
         raise ValueError("ANTHROPIC_API_KEY is required.")
 

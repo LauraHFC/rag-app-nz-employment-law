@@ -117,8 +117,8 @@ _LEXICONS: list[tuple[str, str, re.Pattern]] = [
         "OVERRIDE_RESPONSE",
         re.compile(
             r"\b("
-            r"he.?s\s+going\s+to\s+hurt(\s+me)?"
-            r"|she.?s\s+going\s+to\s+hurt(\s+me)?"
+            r"he(?:.?s|\s+is)\s+going\s+to\s+hurt(\s+me)?"
+            r"|she(?:.?s|\s+is)\s+going\s+to\s+hurt(\s+me)?"
             r"|scared\s+(at\s+home|of\s+(him|her|them|my\s+partner))"
             r"|can.?t\s+leave(\s+him|\s+her|\s+them|\s+home)?"
             r"|he\s+hit\s+me"
@@ -127,11 +127,10 @@ _LEXICONS: list[tuple[str, str, re.Pattern]] = [
             r"|(?:my\s+)?(?:husband|wife|spouse|boyfriend|girlfriend|ex)\s+"
             r"(?:hit|hurt|choked|threatened|strangled|beat|punched|slapped)\s+me"
             r"|my\s+partner\s+(hit|hurt|choked|threatened|strangled)\s+me"
-            r"|(?:he|she).?ll\s+find\s+me"
-            r"|if\s+I\s+leave\s+he.?ll"
-            r"|if\s+I\s+leave\s+she.?ll"
-            r"|domestic\s+violence"
-            r"|family\s+violence"
+            r"|(?:he|she)(?:.?ll|\s+will)\s+find\s+me"
+            r"|if\s+I\s+leave\s+he(?:.?ll|\s+will)"
+            r"|if\s+I\s+leave\s+she(?:.?ll|\s+will)"
+            r"|(?:domestic|family)\s+violence\s+(?:against\s+me|at\s+home|is\s+getting\s+worse|happening)"
             r"|protection\s+order.*urgent"
             r"|restraining\s+order.*urgent"
             r")\b",

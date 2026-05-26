@@ -170,14 +170,100 @@ def _ensure_tax_vectorstore() -> None:
     )
 
 
+# ── Tenancy vector store bootstrap ─────────────────────────────────────────────
+def _ensure_tenancy_vectorstore() -> None:
+    """
+    Ensure the tenancy vector store is present locally.
+
+    Same pattern as _ensure_tax_vectorstore(): hosted on Cloudflare R2,
+    downloaded once on first boot.
+
+    Env vars:
+      - TENANCY_VECTORSTORE_URL — public R2 URL to vectorstore_tenancy.tar.gz
+      - TENANCY_VECTORSTORE_VERSION — version string for cache-busting
+    """
+    import logging
+    log = logging.getLogger(__name__)
+
+    project_root = Path(__file__).parent.parent
+    tenancy_dir = project_root / "data" / "vectorstore_tenancy"
+    sentinel = tenancy_dir / "chroma.sqlite3"
+    version_file = tenancy_dir / ".version"
+
+    expected_version = os.environ.get("TENANCY_VECTORSTORE_VERSION")
+
+    on_disk_ok = sentinel.exists() and sentinel.stat().st_size > 1024
+    version_match = True
+    if expected_version is not None:
+        actual_version = (
+            version_file.read_text().strip()
+            if version_file.exists()
+            else None
+        )
+        version_match = actual_version == expected_version
+        if on_disk_ok and not version_match:
+            log.info(
+                "Tenancy vector store version mismatch (have=%r, want=%r) — "
+                "wiping and re-downloading.",
+                actual_version, expected_version,
+            )
+
+    if on_disk_ok and version_match:
+        log.info(
+            "Tenancy vector store already present at %s (version=%s)",
+            tenancy_dir, expected_version or "unversioned",
+        )
+        return
+
+    url = os.environ.get("TENANCY_VECTORSTORE_URL")
+    if not url:
+        log.warning(
+            "TENANCY_VECTORSTORE_URL not set and tenancy vector store missing — "
+            "tenancy queries will fail until vectorstore is provisioned."
+        )
+        return
+
+    log.info("Downloading tenancy vector store from %s ...", url)
+    import urllib.request, tarfile, tempfile
+
+    tenancy_dir.parent.mkdir(parents=True, exist_ok=True)
+    if tenancy_dir.exists():
+        import shutil
+        shutil.rmtree(tenancy_dir)
+
+    req = urllib.request.Request(
+        url,
+        headers={"User-Agent": "Mozilla/5.0 (compatible; nzlaw-api/1.0)"},
+    )
+    with tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False) as tmp:
+        with urllib.request.urlopen(req) as resp:
+            while chunk := resp.read(1024 * 1024):
+                tmp.write(chunk)
+        tmp.flush()
+        log.info("Downloaded %d bytes, extracting...", Path(tmp.name).stat().st_size)
+        with tarfile.open(tmp.name, "r:gz") as tar:
+            tar.extractall(path=project_root / "data")
+        Path(tmp.name).unlink(missing_ok=True)
+
+    if expected_version is not None:
+        try:
+            version_file.write_text(expected_version)
+        except Exception as exc:
+            log.warning("Failed to write .version file: %s", exc)
+
+    log.info(
+        "Tenancy vector store ready at %s (version=%s)",
+        tenancy_dir, expected_version or "unversioned",
+    )
+
+
 # ── Startup ────────────────────────────────────────────────────────────────────
 @app.on_event("startup")
 def startup() -> None:
-    """Initialise audit DB and download tax vector store on startup."""
+    """Initialise audit DB and download vector stores on startup."""
     try:
         init_db()
     except Exception as exc:
-        # Log but do not crash the app — audit DB failure should not block serving
         import logging
         logging.getLogger(__name__).error("Audit DB init failed: %s", exc)
 
@@ -187,6 +273,14 @@ def startup() -> None:
         import logging
         logging.getLogger(__name__).error(
             "Tax vector store bootstrap failed: %s — tax queries will fail.", exc
+        )
+
+    try:
+        _ensure_tenancy_vectorstore()
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).error(
+            "Tenancy vector store bootstrap failed: %s — tenancy queries will fail.", exc
         )
 
 
@@ -366,10 +460,7 @@ def agent_query(req: AgentQueryRequest, request: Request) -> AgentQueryResponse:
     with eval_trace_context(request.headers):
         # ── Run the full agent pipeline ──────────────────────────────────────
         try:
-            result = agent_run(
-                question=req.question,
-                api_key=os.getenv("ANTHROPIC_API_KEY"),
-            )
+            result = agent_run(question=req.question)
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"Agent pipeline failed: {exc}") from exc
 

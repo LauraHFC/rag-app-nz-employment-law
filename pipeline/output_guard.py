@@ -43,7 +43,7 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 RISK_FOOTER_LIGHT = (
-    "AI-generated · verify with the source cited above before acting on it."
+    "AI-generated · verify with the source cited before acting on it."
 )
 
 # Identifier substring used to detect the footer's presence in answer text.
