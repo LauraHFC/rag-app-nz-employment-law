@@ -257,6 +257,92 @@ def _ensure_tenancy_vectorstore() -> None:
     )
 
 
+def _ensure_consumer_vectorstore() -> None:
+    """
+    Ensure the consumer protection vector store is present locally.
+
+    Same pattern as _ensure_tenancy_vectorstore(): hosted on Cloudflare R2,
+    downloaded once on first boot.
+
+    Env vars:
+      - CONSUMER_VECTORSTORE_URL — public R2 URL to vectorstore_consumer.tar.gz
+      - CONSUMER_VECTORSTORE_VERSION — version string for cache-busting
+    """
+    import logging
+    log = logging.getLogger(__name__)
+
+    project_root = Path(__file__).parent.parent
+    consumer_dir = project_root / "data" / "vectorstore_consumer"
+    sentinel = consumer_dir / "chroma.sqlite3"
+    version_file = consumer_dir / ".version"
+
+    expected_version = os.environ.get("CONSUMER_VECTORSTORE_VERSION")
+
+    on_disk_ok = sentinel.exists() and sentinel.stat().st_size > 1024
+    version_match = True
+    if expected_version is not None:
+        actual_version = (
+            version_file.read_text().strip()
+            if version_file.exists()
+            else None
+        )
+        version_match = actual_version == expected_version
+        if on_disk_ok and not version_match:
+            log.info(
+                "Consumer vector store version mismatch (have=%r, want=%r) — "
+                "wiping and re-downloading.",
+                actual_version, expected_version,
+            )
+
+    if on_disk_ok and version_match:
+        log.info(
+            "Consumer vector store already present at %s (version=%s)",
+            consumer_dir, expected_version or "unversioned",
+        )
+        return
+
+    url = os.environ.get("CONSUMER_VECTORSTORE_URL")
+    if not url:
+        log.warning(
+            "CONSUMER_VECTORSTORE_URL not set and consumer vector store missing — "
+            "consumer queries will fail until vectorstore is provisioned."
+        )
+        return
+
+    log.info("Downloading consumer vector store from %s ...", url)
+    import urllib.request, tarfile, tempfile
+
+    consumer_dir.parent.mkdir(parents=True, exist_ok=True)
+    if consumer_dir.exists():
+        import shutil
+        shutil.rmtree(consumer_dir)
+
+    req = urllib.request.Request(
+        url,
+        headers={"User-Agent": "Mozilla/5.0 (compatible; nzlaw-api/1.0)"},
+    )
+    with tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False) as tmp:
+        with urllib.request.urlopen(req) as resp:
+            while chunk := resp.read(1024 * 1024):
+                tmp.write(chunk)
+        tmp.flush()
+        log.info("Downloaded %d bytes, extracting...", Path(tmp.name).stat().st_size)
+        with tarfile.open(tmp.name, "r:gz") as tar:
+            tar.extractall(path=project_root / "data")
+        Path(tmp.name).unlink(missing_ok=True)
+
+    if expected_version is not None:
+        try:
+            version_file.write_text(expected_version)
+        except Exception as exc:
+            log.warning("Failed to write .version file: %s", exc)
+
+    log.info(
+        "Consumer vector store ready at %s (version=%s)",
+        consumer_dir, expected_version or "unversioned",
+    )
+
+
 # ── Startup ────────────────────────────────────────────────────────────────────
 @app.on_event("startup")
 def startup() -> None:
@@ -281,6 +367,14 @@ def startup() -> None:
         import logging
         logging.getLogger(__name__).error(
             "Tenancy vector store bootstrap failed: %s — tenancy queries will fail.", exc
+        )
+
+    try:
+        _ensure_consumer_vectorstore()
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).error(
+            "Consumer vector store bootstrap failed: %s — consumer queries will fail.", exc
         )
 
 

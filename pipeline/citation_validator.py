@@ -82,6 +82,15 @@ ALLOWED_DOMAINS: set[str] = {
     "www.govt.nz",
     "forms.justice.govt.nz",
     "www.forms.justice.govt.nz",
+    # Consumer protection
+    "consumerprotection.govt.nz",
+    "www.consumerprotection.govt.nz",
+    "comcom.govt.nz",
+    "www.comcom.govt.nz",
+    "disputestribunal.govt.nz",
+    "www.disputestribunal.govt.nz",
+    "motortraders.govt.nz",
+    "www.motortraders.govt.nz",
     # Stats (labour market tool)
     "stats.govt.nz",
     "www.stats.govt.nz",

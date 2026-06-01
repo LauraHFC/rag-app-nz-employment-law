@@ -1,7 +1,7 @@
 """
 pipeline/agent_router.py
 ========================
-Top-level Claude tool-use agent router for the NZ Employment & Tax Law service.
+Top-level Claude tool-use agent router for the NZ Law Compass service.
 v3 (Sprint 6) — risk-control architecture torn down and rebuilt.
 
 Sprint 4's 9-layer pipeline forced every (M/L, ADVICE) question through a
@@ -82,6 +82,10 @@ REFERRAL_BANK: dict[str, dict[str, list[str]]] = {
     "tax": {
         "free": ["IRD (ird.govt.nz) — free helpline 0800 775 247"],
         "paid": ["Chartered accountant", "Tax lawyer"],
+    },
+    "consumer": {
+        "free": ["Consumer Protection NZ (consumerprotection.govt.nz)", "Disputes Tribunal 0800 268 787", "Citizens Advice Bureau 0800 367 222"],
+        "paid": ["Consumer lawyer", "Community Law (communitylaw.org.nz)"],
     },
     "immigration": {
         "free": ["Immigration NZ (immigration.govt.nz)", "IAA register of licensed advisers (iaa.govt.nz)"],
@@ -207,6 +211,34 @@ TOOLS: list[dict] = [
         },
     },
     {
+        "name": "search_consumer_law",
+        "description": (
+            "Search the NZ consumer protection law knowledge base. Use for questions about: "
+            "consumer rights when buying goods or services, refunds/repairs/replacements under "
+            "the Consumer Guarantees Act, faulty products, misleading advertising or pricing "
+            "under the Fair Trading Act, unfair contract terms, door-to-door and telemarketing sales, "
+            "layby purchases, online shopping rights, scams, buying a car (dealer or private), "
+            "the Disputes Tribunal (how to file a claim, jurisdiction, process), "
+            "credit contracts and consumer finance (loans, fees, hardship applications, repossession) "
+            "under the CCCFA, and general consumer complaint processes. "
+            "OUT OF SCOPE: insurance disputes (use Banking/Insurance Ombudsman), "
+            "telecommunications complaints (use TDR), real estate agent complaints (use REA)."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": (
+                        "Search query rephrased for retrieval — focus on the consumer right, "
+                        "guarantee, or process being asked about."
+                    ),
+                }
+            },
+            "required": ["query"],
+        },
+    },
+    {
         "name": "query_labour_market_stats",
         "description": (
             "Query NZ labour market statistics from Stats NZ and MBIE databases. "
@@ -237,8 +269,8 @@ TOOLS: list[dict] = [
 
 ROUTING_SYSTEM_PROMPT = """\
 You are a routing agent for an NZ legal information service covering employment law, \
-tax law, and tenancy law.
-You have four tools available. Your ONLY job is to decide which tool(s) to call.
+tax law, tenancy law, and consumer protection law.
+You have five tools available. Your ONLY job is to decide which tool(s) to call.
 
 ABSOLUTE RULES — follow these without exception:
 1. You MUST call at least one tool. You are not permitted to answer from prior knowledge.
@@ -247,16 +279,26 @@ ABSOLUTE RULES — follow these without exception:
    - Tax treatment of a redundancy payment → search_employment_law + search_tax_law
    - Employer-provided accommodation and eviction → search_employment_law + search_tenancy_law
    - Tenant's tax obligations on subletting income → search_tenancy_law + search_tax_law
-4. If the question is entirely outside NZ employment law, NZ tax law, NZ tenancy law, and \
-NZ labour market statistics, do NOT call any tool. Instead, your ENTIRE response must be \
-exactly this one JSON line and NOTHING else — no sentence before it, no explanation after it:
+   - Bought a faulty product from employer → search_consumer_law (consumer issue, not employment)
+   - Consumer rights when buying from a tradesperson → search_consumer_law
+   - Disputes Tribunal for unpaid wages → search_employment_law (ERA, not Disputes Tribunal)
+4. If the question is entirely outside NZ employment law, NZ tax law, NZ tenancy law, \
+NZ consumer protection law, and NZ labour market statistics, do NOT call any tool. Instead, \
+your ENTIRE response must be exactly this one JSON line and NOTHING else — no sentence \
+before it, no explanation after it:
      {"refused": true, "reason": "out of scope"}
    Any prose around the JSON will break routing.
 5. TENANCY SCOPE: residential tenancies, bonds, rent, repairs, Healthy Homes, Tenancy Tribunal, \
 boarding houses, family violence withdrawal, unenforceable clauses. \
 OUT OF SCOPE for tenancy: Māori land tenancies, commercial leases, body corporate / unit title disputes.
-6. Never use the words "legal advice", "tax advice", "your case", or predict outcomes.
-7. Do not ask the user for clarification — make the best routing decision you can.
+6. CONSUMER SCOPE: Consumer Guarantees Act (refunds, repairs, replacements for goods/services), \
+Fair Trading Act (misleading conduct, unfair contract terms, door-to-door sales, layby), \
+Credit Contracts and Consumer Finance Act (loans, fees, hardship, repossession), \
+Motor Vehicle Sales Act (buying cars from dealers), Disputes Tribunal (small claims process), \
+scams, online shopping rights. \
+OUT OF SCOPE for consumer: insurance ombudsman disputes, telco complaints, real estate agent complaints.
+7. Never use the words "legal advice", "tax advice", "your case", or predict outcomes.
+8. Do not ask the user for clarification — make the best routing decision you can.
 """
 
 # ---------------------------------------------------------------------------
@@ -465,6 +507,9 @@ def _dispatch_tool(tool_name: str, tool_input: dict) -> Any:
     elif tool_name == "search_tenancy_law":
         from pipeline.tools.tenancy_search import execute
         return execute(tool_input)
+    elif tool_name == "search_consumer_law":
+        from pipeline.tools.consumer_search import execute
+        return execute(tool_input)
     elif tool_name == "query_labour_market_stats":
         from pipeline.tools.labour_stats import execute
         return execute(tool_input)
@@ -632,6 +677,7 @@ def _synthesise(
                 "contact:\n"
                 "  • Employment NZ 0800 20 90 20\n"
                 "  • IRD 0800 775 247\n"
+                "  • Consumer Protection NZ (consumerprotection.govt.nz)\n"
                 "  • Community Law (communitylaw.org.nz)"
             )
             return tool_error, deduped_sources, domains_used, chart, 0, []
@@ -643,6 +689,7 @@ def _synthesise(
             "For accurate information please contact:\n"
             "  • Employment NZ 0800 20 90 20\n"
             "  • IRD 0800 775 247\n"
+            "  • Consumer Protection NZ (consumerprotection.govt.nz)\n"
             "  • Community Law (communitylaw.org.nz)"
         )
         return no_info, deduped_sources, domains_used, chart, 0, []
@@ -810,6 +857,10 @@ def run(question: str) -> AgentResponse:
         domain_label = "employment"
     elif "tax" in successful_domains:
         domain_label = "tax"
+    elif "tenancy" in successful_domains:
+        domain_label = "tenancy"
+    elif "consumer" in successful_domains:
+        domain_label = "consumer"
     elif "labour_stats" in successful_domains:
         domain_label = "labour_stats"
 
